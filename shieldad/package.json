@@ -1,0 +1,20 @@
+{
+  "name": "shieldad",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Open-source browser and DNS-only Android ad blocking",
+  "license": "MIT",
+  "workspaces": [
+    "tools",
+    "extension"
+  ],
+  "scripts": {
+    "build-lists": "npm run build-lists --workspace=@shieldad/tools",
+    "build:extension": "npm run build --workspace=@shieldad/extension",
+    "test": "npm test --workspace=@shieldad/tools",
+    "build": "npm run build-lists && npm run build:extension"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

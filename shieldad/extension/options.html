@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ShieldAd settings</title><link rel="stylesheet" href="options.css"></head>
+<body><main>
+  <header><div class="mark">S</div><div><h1>ShieldAd settings</h1><p>Your rules stay in your browser’s synchronized storage.</p></div></header>
+  <section><div class="section-title"><div><h2>Custom block rules</h2><p>Use Adblock Plus network syntax, one rule per line.</p></div><span>Up to 1,000</span></div>
+    <textarea id="customRules" spellcheck="false" placeholder="||ads.example.com^&#10;*/tracking/pixel/*$image&#10;@@||needed.example.com^"></textarea>
+    <p class="hint">Supports domains, URL wildcards, @@ exceptions, $third-party, $script, $image, and $xmlhttprequest.</p>
+  </section>
+  <section><div class="section-title"><div><h2>Allowed websites</h2><p>Disable network and cosmetic blocking for these domains and their subdomains.</p></div></div>
+    <textarea id="allowlist" class="short" spellcheck="false" placeholder="example.com&#10;trusted-site.org"></textarea>
+  </section>
+  <div class="actions"><button id="save">Save changes</button><span id="saved" role="status"></span></div>
+  <footer>ShieldAd never sends your custom rules or browsing history to a ShieldAd server.</footer>
+</main><script src="options.js"></script></body></html>

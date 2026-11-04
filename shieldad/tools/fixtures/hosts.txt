@@ -1,0 +1,4 @@
+# ShieldAd deterministic hosts fixture
+0.0.0.0 ads.example.com
+0.0.0.0 telemetry.example.org
+127.0.0.1 localhost

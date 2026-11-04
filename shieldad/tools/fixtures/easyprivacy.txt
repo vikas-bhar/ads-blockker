@@ -1,0 +1,3 @@
+||tracker.example.net^
+||analytics.example.org^$xmlhttprequest
+@@||analytics.example.org^$domain=trusted.example.com
