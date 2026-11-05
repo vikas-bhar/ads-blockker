@@ -1,0 +1,51 @@
+name: ShieldAd build and test
+
+on:
+  push:
+    paths:
+      - 'shieldad/**'
+      - '.github/workflows/shieldad-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: shieldad/package-lock.json
+      - name: Install Node dependencies
+        working-directory: shieldad
+        run: npm ci
+      - name: Test filter parser
+        working-directory: shieldad
+        run: npm test
+      - name: Compile lists and package browser extensions
+        working-directory: shieldad
+        run: npm run build
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: false
+      - name: Test Android and assemble both APK variants
+        working-directory: shieldad/android
+        run: ./gradlew --stacktrace testDebugUnitTest assembleDebug assembleRelease
+      - name: Upload browser extensions
+        uses: actions/upload-artifact@v7
+        with:
+          name: shieldad-extensions
+          path: shieldad/dist/*.zip
+      - name: Upload Android APKs
+        uses: actions/upload-artifact@v7
+        with:
+          name: shieldad-android-apks
+          path: shieldad/android/app/build/outputs/apk/**/*.apk

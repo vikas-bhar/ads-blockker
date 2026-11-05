@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "ShieldAd",
+  "version": "1.0.0",
+  "description": "Fast network and cosmetic ad blocking with per-site controls.",
+  "permissions": ["declarativeNetRequest", "declarativeNetRequestFeedback", "storage", "alarms", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "page": "background.html" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ShieldAd protection",
+    "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png" }
+  },
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "content_scripts": [{
+    "matches": ["http://*/*", "https://*/*"],
+    "js": ["content.js"],
+    "run_at": "document_start",
+    "all_frames": true
+  }],
+  "declarative_net_request": {
+    "rule_resources": [{ "id": "ads", "enabled": true, "path": "rulesets/ads.json" }]
+  },
+  "browser_specific_settings": {
+    "gecko": { "id": "shieldad@shieldad.org", "strict_min_version": "115.0" }
+  }
+}

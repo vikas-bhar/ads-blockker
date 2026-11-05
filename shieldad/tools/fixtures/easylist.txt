@@ -1,0 +1,7 @@
+! Deterministic ShieldAd compiler fixture
+||ads.example.com^
+||cdn.example.net^$third-party
+*/banner/*$image
+@@||ads.example.com^$script
+example.com##.sponsored
+example.com#@#.allowed-sponsored

@@ -1,0 +1,6 @@
+-keepclassmembers class * extends android.app.Service { public <init>(); }
+-keepclassmembers class * extends androidx.work.ListenableWorker { public <init>(android.content.Context,androidx.work.WorkerParameters); }
+-keep class org.shieldad.data.** { *; }
+-keepclassmembers class org.shieldad.data.QueryLogEntity { <init>(...); }
+-dontwarn org.conscrypt.**
+-dontwarn org.openjsse.**

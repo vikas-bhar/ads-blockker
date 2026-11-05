@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">ShieldAd</string>
+    <string name="vpn_channel">DNS protection</string>
+    <string name="update_channel">Filter updates</string>
+</resources>

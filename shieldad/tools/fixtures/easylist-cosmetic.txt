@@ -1,0 +1,3 @@
+##.advertisement
+##.sponsored-widget
+news.example.com##.house-ad

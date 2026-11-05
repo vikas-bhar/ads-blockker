@@ -1,0 +1,13 @@
+{
+  "name": "@shieldad/tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build-lists": "node scripts/build-lists.mjs",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand"
+  },
+  "devDependencies": {
+    "jest": "^30.5.2"
+  }
+}

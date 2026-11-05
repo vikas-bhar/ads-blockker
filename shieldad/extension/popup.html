@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShieldAd</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header class="brand-row">
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 28 7v8c0 7.8-4.9 12.8-12 15C8.9 27.8 4 22.8 4 15V7l12-5Z" fill="currentColor"/><path d="m10.5 15.5 3.5 3.5 7.8-8" fill="none" stroke="white" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div><h1>ShieldAd</h1><p id="statusText">Protection is on</p></div>
+      </div>
+      <button id="power" class="switch on" role="switch" aria-checked="true" aria-label="Global ad protection"><span></span></button>
+    </header>
+
+    <section class="count-card" aria-live="polite">
+      <span class="eyebrow">ON THIS TAB</span>
+      <div class="count-line"><strong id="blockedCount">0</strong><span>ads &amp; trackers<br>blocked</span></div>
+      <div class="clean-line"><span class="pulse"></span><span id="siteText">Checking this site…</span></div>
+    </section>
+
+    <section class="site-control">
+      <div><h2>Pause on this site</h2><p id="hostname">This tab</p></div>
+      <button id="siteToggle" class="switch" role="switch" aria-checked="false" aria-label="Pause ShieldAd on this site"><span></span></button>
+    </section>
+
+    <button id="update" class="update-button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Update filter lists</span><span id="updateArrow">→</span>
+    </button>
+    <p id="message" class="message" role="status"></p>
+    <footer><span>Local. Private. Open source.</span><button id="options">Settings</button></footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
