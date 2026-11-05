@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Revolutionizing Tech — 15 Second Motion Scene</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #0c0c1e;
+      --mint: #8affd8;
+      --cyan: #60e8ff;
+      --violet: #9a7bff;
+      --white: #f2f5ff;
+      --ease-out: cubic-bezier(.16, 1, .3, 1);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { margin: 0; min-height: 100%; background: var(--ink); }
+
+    body {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 14px 14px 18px;
+      overflow: auto;
+      font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+      color: var(--white);
+    }
+
+    button { font: inherit; }
+
+    .player {
+      width: min(94vw, calc((100vh - 82px) * .5625), 480px);
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+    }
+
+    .stage {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 9 / 16;
+      overflow: hidden;
+      border-radius: 24px;
+      background: #0c0c1e;
+      box-shadow:
+        0 0 0 1px rgba(154, 123, 255, .13),
+        0 28px 90px rgba(0, 0, 0, .46),
+        0 0 80px rgba(71, 53, 155, .08);
+      isolation: isolate;
+    }
+
+    .canvas {
+      position: absolute;
+      inset: 0 auto auto 0;
+      width: 1080px;
+      height: 1920px;
+      overflow: hidden;
+      transform-origin: 0 0;
+      background:
+        radial-gradient(ellipse at 50% 32%, rgba(54, 40, 119, .22), transparent 48%),
+        linear-gradient(180deg, #0c0c1e 0%, #0d0d21 56%, #090919 100%);
+    }
+
+    .canvas::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 30;
+      pointer-events: none;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,.017) 1px, transparent 1px),
+        linear-gradient(rgba(255,255,255,.012) 1px, transparent 1px);
+      background-size: 90px 90px;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,.25), transparent 42%);
+    }
+
+    .canvas::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 31;
+      pointer-events: none;
+      opacity: .055;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.92' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.9'/%3E%3C/svg%3E");
+      mix-blend-mode: soft-light;
+    }
+
+    .vignette {
+      position: absolute;
+      inset: 0;
+      z-index: 29;
+      pointer-events: none;
+      box-shadow: inset 0 0 230px 70px rgba(0, 0, 12, .72);
+      background: linear-gradient(180deg, rgba(12,12,30,.26), transparent 18%, transparent 78%, rgba(7,7,20,.7));
+    }
+
+    .aurora {
+      position: absolute;
+      width: 850px;
+      height: 850px;
+      border-radius: 50%;
+      filter: blur(110px);
+      opacity: .16;
+      mix-blend-mode: screen;
+      will-change: transform;
+    }
+
+    .aurora-a { left: -420px; top: 160px; background: #4c2ebc; }
+    .aurora-b { right: -470px; top: 690px; background: #006e82; }
+
+    .orbits {
+      position: absolute;
+      left: 38px;
+      top: 40px;
+      width: 1004px;
+      height: 1004px;
+      opacity: .58;
+      will-change: transform;
+    }
+
+    .orbits .dash-a { stroke-dasharray: 4 18; }
+    .orbits .dash-b { stroke-dasharray: 110 32 8 32; }
+
+    .orbit-mark {
+      position: absolute;
+      left: 527px;
+      top: 526px;
+      width: 26px;
+      height: 26px;
+      border: 2px solid rgba(138, 255, 216, .5);
+      border-radius: 50%;
+      box-shadow: 0 0 24px rgba(138, 255, 216, .24);
+      will-change: transform;
+    }
+
+    .grid-floor {
+      position: absolute;
+      left: -330px;
+      bottom: -200px;
+      width: 1740px;
+      height: 930px;
+      opacity: .23;
+      transform: perspective(650px) rotateX(61deg) scale(1.2);
+      transform-origin: center bottom;
+      background-image:
+        linear-gradient(rgba(117, 99, 219, .32) 2px, transparent 2px),
+        linear-gradient(90deg, rgba(117, 99, 219, .32) 2px, transparent 2px);
+      background-size: 92px 92px;
+      mask-image: linear-gradient(to bottom, transparent 0%, #000 40%, #000 100%);
+      will-change: background-position;
+    }
+
+    .horizon {
+      position: absolute;
+      left: 90px;
+      right: 90px;
+      bottom: 510px;
+      height: 1px;
+      opacity: .35;
+      background: linear-gradient(90deg, transparent, rgba(96,232,255,.4), transparent);
+      box-shadow: 0 0 30px rgba(96,232,255,.2);
+    }
+
+    .beam {
+      position: absolute;
+      top: -200px;
+      width: 1px;
+      height: 1000px;
+      opacity: .2;
+      background: linear-gradient(transparent, rgba(139, 119, 255, .75), transparent);
+      transform: rotate(24deg);
+      transform-origin: top;
+    }
+
+    .beam-a { left: 190px; }
+    .beam-b { right: 120px; top: 80px; transform: rotate(-22deg); opacity: .12; }
+
+    .particle {
+      position: absolute;
+      border-radius: 50%;
+      background: #b8c8ff;
+      box-shadow: 0 0 12px currentColor;
+      will-change: transform, opacity;
+    }
+
+    .topline {
+      position: absolute;
+      left: 74px;
+      right: 74px;
+      top: 70px;
+      z-index: 4;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: rgba(216, 222, 255, .46);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 16px;
+      letter-spacing: 4px;
+    }
+
+    .topline .brand { display: flex; align-items: center; gap: 15px; }
+    .topline .brand::before {
+      content: "";
+      width: 24px;
+      height: 24px;
+      border: 1px solid rgba(138,255,216,.6);
+      transform: rotate(45deg);
+      box-shadow: inset 0 0 10px rgba(138,255,216,.12);
+    }
+
+    .title-block {
+      position: absolute;
+      z-index: 8;
+      left: 60px;
+      right: 60px;
+      top: 340px;
+      text-align: center;
+      opacity: 0;
+      will-change: transform, opacity, filter;
+      transform-origin: 50% 55%;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 18px;
+      margin-bottom: 35px;
+      color: var(--mint);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 17px;
+      font-weight: 500;
+      letter-spacing: 7px;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before, .eyebrow::after {
+      content: "";
+      width: 48px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, currentColor);
+    }
+    .eyebrow::after { transform: scaleX(-1); }
+
+    h1 { margin: 0; line-height: .88; text-transform: uppercase; }
+
+    .title-line {
+      display: block;
+      color: #f4f4ff;
+      font-size: 79px;
+      font-weight: 300;
+      letter-spacing: 1px;
+      text-shadow: 0 0 42px rgba(188, 187, 255, .16);
+    }
+
+    .title-tech {
+      position: relative;
+      display: block;
+      margin-top: 24px;
+      font-size: 190px;
+      font-weight: 800;
+      line-height: .9;
+      letter-spacing: 9px;
+      background: linear-gradient(110deg, #f4f2ff 10%, #a99aff 39%, #77efff 65%, #a2ffdf 92%);
+      background-size: 180% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      filter: drop-shadow(0 0 30px rgba(119, 222, 255, .17));
+    }
+
+    .title-rule {
+      width: 420px;
+      height: 1px;
+      margin: 43px auto 26px;
+      background: linear-gradient(90deg, transparent, rgba(154,123,255,.75), rgba(96,232,255,.8), transparent);
+      box-shadow: 0 0 20px rgba(96,232,255,.2);
+    }
+
+    .title-sub {
+      color: rgba(222, 224, 255, .55);
+      font-size: 21px;
+      font-weight: 400;
+      letter-spacing: 6px;
+      text-transform: uppercase;
+    }
+
+    .impact-flash {
+      position: absolute;
+      z-index: 6;
+      left: 50%;
+      top: 510px;
+      width: 880px;
+      height: 450px;
+      margin-left: -440px;
+      border-radius: 50%;
+      opacity: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse, rgba(148,125,255,.2), rgba(96,232,255,.055) 40%, transparent 70%);
+      filter: blur(18px);
+      will-change: opacity, transform;
+    }
+
+    .card-wrap {
+      position: absolute;
+      z-index: 10;
+      left: 100px;
+      top: 860px;
+      width: 880px;
+      height: 650px;
+      opacity: 0;
+      transform-origin: 50% 20%;
+      perspective: 1200px;
+      will-change: transform, opacity, filter;
+    }
+
+    .card-glow {
+      position: absolute;
+      inset: 45px 30px -30px;
+      border-radius: 70px;
+      background: rgba(84, 91, 255, .23);
+      filter: blur(65px);
+      opacity: var(--energy, .2);
+      pointer-events: none;
+    }
+
+    .ui-card {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      border: 1px solid rgba(157, 164, 255, .24);
+      border-radius: 38px;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.055), transparent 28%),
+        linear-gradient(160deg, rgba(25,26,58,.94), rgba(13,15,37,.96));
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.08),
+        inset 0 0 70px rgba(108,89,212,.035),
+        0 35px 80px rgba(0,0,0,.28);
+      backdrop-filter: blur(24px);
+    }
+
+    .ui-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px),
+        linear-gradient(rgba(255,255,255,.02) 1px, transparent 1px);
+      background-size: 42px 42px;
+      mask-image: linear-gradient(135deg, #000, transparent 65%);
+    }
+
+    .card-scan {
+      position: absolute;
+      z-index: 3;
+      left: 0;
+      right: 0;
+      top: 0;
+      height: 140px;
+      opacity: .13;
+      pointer-events: none;
+      background: linear-gradient(180deg, transparent, rgba(96,232,255,.18), transparent);
+      will-change: transform;
+    }
+
+    .corner {
+      position: absolute;
+      z-index: 5;
+      width: 28px;
+      height: 28px;
+      border-color: rgba(138,255,216,.62);
+      border-style: solid;
+    }
+    .corner-tl { left: 18px; top: 18px; border-width: 2px 0 0 2px; border-radius: 7px 0 0 0; }
+    .corner-tr { right: 18px; top: 18px; border-width: 2px 2px 0 0; border-radius: 0 7px 0 0; }
+    .corner-bl { left: 18px; bottom: 18px; border-width: 0 0 2px 2px; border-radius: 0 0 0 7px; }
+    .corner-br { right: 18px; bottom: 18px; border-width: 0 2px 2px 0; border-radius: 0 0 7px 0; }
+
+    .card-header {
+      position: relative;
+      z-index: 4;
+      height: 92px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 46px;
+      border-bottom: 1px solid rgba(177,183,255,.1);
+      color: rgba(222,226,255,.62);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 15px;
+      letter-spacing: 3px;
+    }
+
+    .live { display: flex; align-items: center; gap: 13px; }
+    .live-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--mint);
+      box-shadow: 0 0 16px var(--mint);
+    }
+
+    .core-visual {
+      position: relative;
+      z-index: 4;
+      width: 360px;
+      height: 360px;
+      margin: 12px auto 0;
+    }
+
+    .core-visual svg { width: 360px; height: 360px; overflow: visible; }
+    .progress-ring { filter: drop-shadow(0 0 12px rgba(108,240,255,.48)); }
+
+    .core-number {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-content: center;
+      text-align: center;
+    }
+
+    .metric-main {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      color: #eafffa;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-size: 104px;
+      font-weight: 200;
+      line-height: 1;
+      letter-spacing: -6px;
+      text-shadow: 0 0 24px rgba(138,255,216,.36), 0 0 60px rgba(96,232,255,.14);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .metric-main small {
+      margin-left: 8px;
+      color: var(--mint);
+      font-size: 37px;
+      font-weight: 400;
+      letter-spacing: 0;
+    }
+
+    .core-label {
+      margin-top: 15px;
+      color: rgba(195,213,233,.55);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 13px;
+      letter-spacing: 5px;
+      text-transform: uppercase;
+    }
+
+    .core-pulse {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 188px;
+      height: 188px;
+      margin: -94px;
+      border: 1px solid rgba(138,255,216,.12);
+      border-radius: 50%;
+      will-change: transform, opacity;
+    }
+
+    .mini-metrics {
+      position: relative;
+      z-index: 4;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      margin: 0 42px;
+      padding-top: 19px;
+      border-top: 1px solid rgba(177,183,255,.1);
+    }
+
+    .mini {
+      min-width: 0;
+      padding: 0 23px;
+      border-right: 1px solid rgba(177,183,255,.09);
+    }
+    .mini:last-child { border-right: 0; }
+
+    .mini-value {
+      color: #dfe8ff;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 32px;
+      font-weight: 300;
+      letter-spacing: -1px;
+      font-variant-numeric: tabular-nums;
+    }
+    .mini-value span { color: rgba(138,255,216,.72); font-size: 18px; }
+
+    .mini-label {
+      margin-top: 7px;
+      color: rgba(196,201,235,.42);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 11px;
+      letter-spacing: 3px;
+      white-space: nowrap;
+    }
+
+    .mini-bar {
+      height: 2px;
+      margin-top: 15px;
+      overflow: hidden;
+      background: rgba(255,255,255,.07);
+    }
+    .mini-bar i {
+      display: block;
+      width: 100%;
+      height: 100%;
+      transform: scaleX(0);
+      transform-origin: left;
+      background: linear-gradient(90deg, var(--violet), var(--cyan), var(--mint));
+      box-shadow: 0 0 10px var(--cyan);
+    }
+
+    .complete-badge {
+      position: absolute;
+      z-index: 7;
+      right: 32px;
+      top: 108px;
+      padding: 8px 12px;
+      border: 1px solid rgba(138,255,216,.22);
+      border-radius: 20px;
+      color: var(--mint);
+      background: rgba(28,69,61,.32);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 10px;
+      letter-spacing: 2px;
+      opacity: 0;
+      will-change: transform, opacity;
+    }
+
+    .end-caption {
+      position: absolute;
+      z-index: 7;
+      left: 0;
+      right: 0;
+      top: 1625px;
+      text-align: center;
+      opacity: 0;
+      will-change: opacity, transform;
+    }
+
+    .end-caption strong {
+      display: block;
+      color: rgba(232,232,255,.82);
+      font-size: 20px;
+      font-weight: 400;
+      letter-spacing: 8px;
+    }
+    .end-caption span {
+      display: block;
+      margin-top: 17px;
+      color: rgba(151,157,200,.42);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      letter-spacing: 5px;
+    }
+
+    .time-rail {
+      position: absolute;
+      z-index: 8;
+      left: 220px;
+      bottom: 108px;
+      width: 640px;
+      height: 1px;
+      background: rgba(160,163,225,.12);
+    }
+    .time-rail::before, .time-rail::after {
+      content: "";
+      position: absolute;
+      top: -3px;
+      width: 1px;
+      height: 7px;
+      background: rgba(160,163,225,.24);
+    }
+    .time-rail::after { right: 0; }
+    .time-dot {
+      position: absolute;
+      left: 0;
+      top: -3px;
+      width: 7px;
+      height: 7px;
+      margin-left: -3px;
+      border-radius: 50%;
+      background: var(--mint);
+      box-shadow: 0 0 14px rgba(138,255,216,.8);
+      will-change: transform;
+    }
+
+    .restart {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid rgba(170,174,232,.18);
+      border-radius: 999px;
+      padding: 7px 13px;
+      color: rgba(225,228,255,.62);
+      background: rgba(22,22,49,.72);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: .4px;
+      cursor: pointer;
+      transition: color .35s var(--ease-out), border-color .35s var(--ease-out), background .35s var(--ease-out), transform .35s var(--ease-out);
+    }
+    .restart svg { width: 12px; height: 12px; transition: transform .55s var(--ease-out); }
+    .restart:hover { color: var(--mint); border-color: rgba(138,255,216,.35); background: rgba(28,35,56,.9); transform: translateY(-1px); }
+    .restart:hover svg { transform: rotate(-145deg); }
+    .restart:active { transform: translateY(0) scale(.96); }
+    .restart:focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; }
+
+    @media (max-width: 520px) {
+      .stage { border-radius: 17px; }
+      .player { gap: 9px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="player" aria-label="Revolutionizing Tech motion graphics player">
+    <div class="stage" id="stage">
+      <div class="canvas" id="canvas" role="img" aria-label="A futuristic title, Revolutionizing Tech, followed by a glowing interface counting to one hundred percent">
+        <div class="aurora aurora-a" id="auroraA"></div>
+        <div class="aurora aurora-b" id="auroraB"></div>
+
+        <svg class="orbits" id="orbits" viewBox="0 0 1004 1004" fill="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="orbitStroke" x1="0" y1="0" x2="1" y2="1">
+              <stop stop-color="#9a7bff" stop-opacity=".05" />
+              <stop offset=".48" stop-color="#9a7bff" stop-opacity=".36" />
+              <stop offset="1" stop-color="#60e8ff" stop-opacity=".04" />
+            </linearGradient>
+          </defs>
+          <circle cx="502" cy="502" r="425" stroke="url(#orbitStroke)" stroke-width="1" class="dash-a" />
+          <circle cx="502" cy="502" r="348" stroke="url(#orbitStroke)" stroke-width="1" class="dash-b" />
+          <circle cx="502" cy="502" r="270" stroke="#60e8ff" stroke-opacity=".09" stroke-width="1" />
+          <path d="M502 34V66M502 938V970M34 502H66M938 502H970" stroke="#8affd8" stroke-opacity=".25" />
+        </svg>
+        <div class="orbit-mark" id="orbitMark"></div>
+
+        <div class="grid-floor" id="grid"></div>
+        <div class="horizon"></div>
+        <div class="beam beam-a"></div>
+        <div class="beam beam-b"></div>
+        <div id="particles" aria-hidden="true"></div>
+
+        <div class="topline">
+          <span class="brand">FUTURE / FORM</span>
+          <span>SEQ. 015</span>
+        </div>
+
+        <div class="impact-flash" id="flash"></div>
+
+        <section class="title-block" id="title">
+          <div class="eyebrow">Beyond possible</div>
+          <h1>
+            <span class="title-line">Revolutionizing</span>
+            <strong class="title-tech" id="titleTech">Tech</strong>
+          </h1>
+          <div class="title-rule"></div>
+          <div class="title-sub">The future is a system in motion</div>
+        </section>
+
+        <section class="card-wrap" id="card" aria-label="Futuristic system metrics">
+          <div class="card-glow"></div>
+          <div class="ui-card">
+            <i class="corner corner-tl"></i><i class="corner corner-tr"></i>
+            <i class="corner corner-bl"></i><i class="corner corner-br"></i>
+            <div class="card-scan" id="cardScan"></div>
+            <header class="card-header">
+              <span class="live"><i class="live-dot"></i> NEURAL CORE / LIVE</span>
+              <span>SYS.09</span>
+            </header>
+
+            <div class="complete-badge" id="completeBadge">OPTIMIZED</div>
+
+            <div class="core-visual">
+              <svg viewBox="0 0 360 360" fill="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="progressGradient" x1="50" y1="40" x2="310" y2="320" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#9a7bff" />
+                    <stop offset=".5" stop-color="#60e8ff" />
+                    <stop offset="1" stop-color="#8affd8" />
+                  </linearGradient>
+                  <radialGradient id="coreFill">
+                    <stop stop-color="#6de9e0" stop-opacity=".08" />
+                    <stop offset="1" stop-color="#6de9e0" stop-opacity="0" />
+                  </radialGradient>
+                </defs>
+                <circle cx="180" cy="180" r="128" fill="url(#coreFill)" />
+                <circle cx="180" cy="180" r="145" stroke="#a6b0ef" stroke-opacity=".08" stroke-width="1" stroke-dasharray="2 10" />
+                <circle cx="180" cy="180" r="130" stroke="#a6b0ef" stroke-opacity=".1" stroke-width="5" />
+                <circle id="ring" class="progress-ring" cx="180" cy="180" r="130" stroke="url(#progressGradient)" stroke-width="5" stroke-linecap="round" transform="rotate(-90 180 180)" />
+                <path d="M180 20V31M180 329V340M20 180H31M329 180H340" stroke="#8affd8" stroke-opacity=".34" />
+                <circle cx="180" cy="180" r="103" stroke="#8affd8" stroke-opacity=".07" stroke-width="1" stroke-dasharray="1 7" />
+              </svg>
+              <div class="core-pulse" id="corePulse"></div>
+              <div class="core-number">
+                <div class="metric-main"><span id="mainMetric">0</span><small>%</small></div>
+                <div class="core-label">System optimization</div>
+              </div>
+            </div>
+
+            <div class="mini-metrics">
+              <div class="mini">
+                <div class="mini-value"><b id="metricA">0</b><span>%</span></div>
+                <div class="mini-label">AI CORE</div>
+                <div class="mini-bar"><i id="barA"></i></div>
+              </div>
+              <div class="mini">
+                <div class="mini-value"><b id="metricB">0</b><span>%</span></div>
+                <div class="mini-label">QUANTUM</div>
+                <div class="mini-bar"><i id="barB"></i></div>
+              </div>
+              <div class="mini">
+                <div class="mini-value"><b id="metricC">0</b><span>%</span></div>
+                <div class="mini-label">NETWORK</div>
+                <div class="mini-bar"><i id="barC"></i></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="end-caption" id="endCaption">
+          <strong>ENGINEERED FOR WHAT’S NEXT</strong>
+          <span>INNOVATION WITHOUT LIMITS</span>
+        </div>
+
+        <div class="time-rail" id="timeRail"><i class="time-dot" id="timeDot"></i></div>
+        <div class="vignette"></div>
+      </div>
+    </div>
+
+    <button class="restart" id="restart" type="button" aria-label="Restart the fifteen second scene">
+      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M13.2 6.1A5.5 5.5 0 1 0 12.7 11M13.2 2.4v3.8H9.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      Restart Scene
+    </button>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const $ = (id) => document.getElementById(id);
+      const DURATION = 15000;
+      const clamp = (v, min = 0, max = 1) => Math.min(max, Math.max(min, v));
+      const range = (t, start, duration) => clamp((t - start) / duration);
+      const mix = (a, b, t) => a + (b - a) * t;
+
+      // True cubic Bézier evaluation, including overshooting y values for the title snap.
+      function cubicBezier(x1, y1, x2, y2) {
+        const A = (a1, a2) => 1 - 3 * a2 + 3 * a1;
+        const B = (a1, a2) => 3 * a2 - 6 * a1;
+        const C = (a1) => 3 * a1;
+        const calc = (t, a1, a2) => ((A(a1, a2) * t + B(a1, a2)) * t + C(a1)) * t;
+        const slope = (t, a1, a2) => 3 * A(a1, a2) * t * t + 2 * B(a1, a2) * t + C(a1);
+        return (x) => {
+          if (x <= 0) return 0;
+          if (x >= 1) return 1;
+          let t = x;
+          for (let i = 0; i < 8; i++) {
+            const currentSlope = slope(t, x1, x2);
+            if (Math.abs(currentSlope) < 1e-6) break;
+            t -= (calc(t, x1, x2) - x) / currentSlope;
+          }
+          let lower = 0, upper = 1;
+          while (calc(t, x1, x2) < x - 1e-6 && lower < 1) {
+            lower = t;
+            t = (t + upper) / 2;
+          }
+          while (calc(t, x1, x2) > x + 1e-6 && upper > 0) {
+            upper = t;
+            t = (t + lower) / 2;
+          }
+          return calc(t, y1, y2);
+        };
+      }
+
+      const ease = {
+        snap: cubicBezier(.16, 1.32, .22, 1),
+        reveal: cubicBezier(.16, 1, .3, 1),
+        count: cubicBezier(.22, .78, .18, 1),
+        exit: cubicBezier(.7, 0, .84, 0),
+        cinematic: cubicBezier(.76, 0, .24, 1),
+        breathe: cubicBezier(.45, 0, .55, 1)
+      };
+
+      const el = {
+        canvas: $("canvas"), stage: $("stage"), title: $("title"), titleTech: $("titleTech"),
+        card: $("card"), flash: $("flash"), orbits: $("orbits"), orbitMark: $("orbitMark"),
+        auroraA: $("auroraA"), auroraB: $("auroraB"), grid: $("grid"),
+        mainMetric: $("mainMetric"), metricA: $("metricA"), metricB: $("metricB"), metricC: $("metricC"),
+        barA: $("barA"), barB: $("barB"), barC: $("barC"), ring: $("ring"),
+        corePulse: $("corePulse"), cardScan: $("cardScan"), completeBadge: $("completeBadge"),
+        endCaption: $("endCaption"), timeRail: $("timeRail"), timeDot: $("timeDot")
+      };
+
+      const circumference = 2 * Math.PI * 130;
+      el.ring.style.strokeDasharray = `${circumference}`;
+      el.ring.style.strokeDashoffset = `${circumference}`;
+
+      // Deterministic particle field: the composition is identical on every loop.
+      let seed = 9015;
+      const random = () => {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        return seed / 4294967296;
+      };
+      const particles = [];
+      for (let i = 0; i < 32; i++) {
+        const node = document.createElement("i");
+        const size = mix(2, 5, random());
+        const particle = {
+          node,
+          x: random() * 1080,
+          y: 140 + random() * 1530,
+          phase: random() * Math.PI * 2,
+          drift: mix(10, 38, random()),
+          alpha: mix(.08, .42, random())
+        };
+        node.className = "particle";
+        node.style.cssText = `left:${particle.x}px;top:${particle.y}px;width:${size}px;height:${size}px;color:${i % 4 === 0 ? "#8affd8" : "#a6a2ff"}`;
+        $("particles").appendChild(node);
+        particles.push(particle);
+      }
+
+      function fitCanvas() {
+        const scale = el.stage.clientWidth / 1080;
+        el.canvas.style.transform = `scale(${scale})`;
+      }
+      new ResizeObserver(fitCanvas).observe(el.stage);
+      fitCanvas();
+
+      let sceneStart = performance.now();
+      const ambientStart = sceneStart;
+
+      function render(t, ambient) {
+        // Ambient motion uses continuous time, so the 15s wrap never causes a visual jump.
+        el.orbits.style.transform = `rotate(${ambient * 3.2}deg) scale(${1 + Math.sin(ambient * .45) * .012})`;
+        el.orbitMark.style.transform = `translate(${Math.cos(ambient * .32) * 345}px, ${Math.sin(ambient * .32) * 345}px)`;
+        el.auroraA.style.transform = `translate(${Math.sin(ambient * .16) * 90}px, ${Math.cos(ambient * .13) * 70}px)`;
+        el.auroraB.style.transform = `translate(${Math.cos(ambient * .12) * -100}px, ${Math.sin(ambient * .17) * 65}px)`;
+        el.grid.style.backgroundPosition = `0 ${ambient * 28}px`;
+        particles.forEach((p) => {
+          p.node.style.transform = `translate(${Math.sin(ambient * .24 + p.phase) * p.drift}px, ${Math.cos(ambient * .19 + p.phase) * p.drift}px)`;
+          p.node.style.opacity = p.alpha * (.65 + Math.sin(ambient * .7 + p.phase) * .35);
+        });
+
+        // TITLE — begins at exactly 00:00.500.
+        const titleIn = range(t, 500, 850);
+        const titleSnap = ease.snap(titleIn);
+        let titleOpacity = clamp(titleIn * 4.5);
+        let titleScale = mix(.58, 1, titleSnap);
+        let titleY = mix(95, 0, ease.reveal(titleIn));
+        let titleBlur = mix(22, 0, clamp(titleIn * 1.8));
+        const titleOut = ease.exit(range(t, 12150, 1650));
+        titleOpacity *= 1 - titleOut;
+        titleScale += titleOut * .16;
+        titleY -= titleOut * 55;
+        titleBlur += titleOut * 13;
+        el.title.style.opacity = titleOpacity;
+        el.title.style.transform = `translate3d(0, ${titleY + Math.sin(ambient * 1.05) * 3 * (1 - titleOut)}px, 0) scale(${titleScale})`;
+        el.title.style.filter = `blur(${titleBlur}px)`;
+        el.titleTech.style.backgroundPosition = `${mix(0, 100, ease.cinematic(range(t, 900, 2600)))}% 50%`;
+
+        const impact = range(t, 420, 900);
+        el.flash.style.opacity = impact > 0 && impact < 1 ? Math.sin(impact * Math.PI) * .95 : 0;
+        el.flash.style.transform = `scale(${mix(.4, 1.35, ease.reveal(impact))})`;
+
+        // UI CARD — emergence begins at exactly 00:03.000.
+        const cardIn = range(t, 3000, 1150);
+        const cardReveal = ease.reveal(cardIn);
+        const cardOut = ease.exit(range(t, 12400, 1600));
+        let cardOpacity = clamp(cardIn * 3.4) * (1 - cardOut);
+        const cardScale = mix(.8, 1, cardReveal) * mix(1, .92, cardOut);
+        const cardY = mix(155, 0, cardReveal) - cardOut * 85 + Math.sin(ambient * .82) * 5 * cardReveal * (1 - cardOut);
+        const cardRotate = mix(16, 0, cardReveal);
+        el.card.style.opacity = cardOpacity;
+        el.card.style.transform = `translate3d(0, ${cardY}px, 0) scale(${cardScale}) rotateX(${cardRotate}deg)`;
+        el.card.style.filter = `blur(${mix(14, 0, clamp(cardIn * 2)) + cardOut * 9}px)`;
+        el.card.style.setProperty("--energy", mix(.08, .85, cardReveal) * (1 - cardOut));
+
+        // Four synchronized counters, 0% → 100%, beginning just after the card lands.
+        const rawCount = range(t, 3250, 3500);
+        const count = ease.count(rawCount);
+        const value = Math.round(count * 100);
+        const subValue = (delay) => Math.round(ease.count(range(t, 3250 + delay, 3200)) * 100);
+        const values = [subValue(0), subValue(110), subValue(220)];
+        el.mainMetric.textContent = value;
+        el.metricA.textContent = values[0];
+        el.metricB.textContent = values[1];
+        el.metricC.textContent = values[2];
+        el.barA.style.transform = `scaleX(${values[0] / 100})`;
+        el.barB.style.transform = `scaleX(${values[1] / 100})`;
+        el.barC.style.transform = `scaleX(${values[2] / 100})`;
+        el.ring.style.strokeDashoffset = `${circumference * (1 - count)}`;
+
+        const pulse = 1 + Math.sin(ambient * 2.2) * .035 * count;
+        el.corePulse.style.transform = `scale(${pulse + count * .05})`;
+        el.corePulse.style.opacity = count * (.55 + Math.sin(ambient * 2.2) * .2);
+        el.cardScan.style.transform = `translateY(${(ambient * 85) % 700 - 120}px)`;
+
+        const complete = ease.reveal(range(t, 7000, 650)) * (1 - cardOut);
+        el.completeBadge.style.opacity = complete;
+        el.completeBadge.style.transform = `translateY(${mix(10, 0, complete)}px) scale(${mix(.85, 1, complete)})`;
+
+        const captionIn = ease.reveal(range(t, 8200, 1000));
+        const captionOut = ease.exit(range(t, 12200, 1350));
+        el.endCaption.style.opacity = captionIn * (1 - captionOut);
+        el.endCaption.style.transform = `translateY(${mix(35, 0, captionIn) - captionOut * 22}px)`;
+        el.endCaption.style.letterSpacing = `${mix(4, 0, captionIn)}px`;
+
+        const railVisibility = ease.reveal(range(t, 800, 800)) * (1 - ease.exit(range(t, 14000, 800)));
+        el.timeRail.style.opacity = railVisibility * .8;
+        el.timeDot.style.transform = `translateX(${640 * (t / DURATION)}px)`;
+      }
+
+      function frame(now) {
+        render((now - sceneStart) % DURATION, (now - ambientStart) / 1000);
+        requestAnimationFrame(frame);
+      }
+
+      $("restart").addEventListener("click", () => {
+        sceneStart = performance.now();
+        render(0, (sceneStart - ambientStart) / 1000);
+      });
+
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
