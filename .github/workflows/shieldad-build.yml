@@ -38,7 +38,24 @@ jobs:
           cache-read-only: false
       - name: Test Android and assemble both APK variants
         working-directory: shieldad/android
-        run: ./gradlew --stacktrace testDebugUnitTest assembleDebug assembleRelease
+        shell: bash
+        run: |
+          set +e
+          ./gradlew --stacktrace --console=plain testDebugUnitTest assembleDebug assembleRelease > gradle-build.log 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            {
+              echo '### Android Gradle failure'
+              echo '```text'
+              tail -n 120 gradle-build.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            grep -E '^e: |FAILURE:|^> |error:' gradle-build.log | tail -n 20 | while IFS= read -r line; do
+              printf '::error::%s\n' "$line"
+            done
+          fi
+          tail -n 100 gradle-build.log
+          exit "$status"
       - name: Upload browser extensions
         uses: actions/upload-artifact@v7
         with:
