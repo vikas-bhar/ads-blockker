@@ -50,8 +50,8 @@ jobs:
               tail -n 120 gradle-build.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            grep -E '^e: |FAILURE:|^> |error:' gradle-build.log | tail -n 20 | while IFS= read -r line; do
-              printf '::error::%s\n' "$line"
+            tail -n 45 gradle-build.log | while IFS= read -r line; do
+              if [ -n "$line" ]; then printf '::error::%s\n' "$line"; fi
             done
           fi
           tail -n 100 gradle-build.log
