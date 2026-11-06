@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import {
   compileCosmeticRules,
+  compileDomainRules,
   compileNetworkRules,
   domainFromNetworkFilter,
   parseCosmeticFilter,
@@ -61,6 +62,20 @@ describe('network filter parser', () => {
     expect(rules[0].action.type).toBe('allow');
     expect(new Set(rules.map((rule) => rule.id)).size).toBe(20);
   });
+
+  it('reserves space for URL patterns while prioritizing domain rules', () => {
+    const lines = [];
+    for (let i = 0; i < 50; i += 1) lines.push(`||ads-${i}.example.com^`);
+    for (let i = 0; i < 50; i += 1) lines.push(`/banner-${i}/*`);
+    const rules = compileNetworkRules(lines, { limit: 20 });
+    expect(rules).toHaveLength(20);
+    expect(rules.filter((rule) => rule.condition.requestDomains)).toHaveLength(15);
+    expect(rules.filter((rule) => rule.condition.urlFilter)).toHaveLength(5);
+  });
+
+  it('accepts the all resource option without narrowing the rule', () => {
+    expect(parseNetworkFilter('||ads.example.com^$all').condition).toEqual({ requestDomains: ['ads.example.com'] });
+  });
 });
 
 describe('cosmetic and hosts parsing', () => {
@@ -81,6 +96,15 @@ describe('cosmetic and hosts parsing', () => {
     expect(result.exceptions['global.example']).toEqual(['.ad']);
     expect(result.domains['mixed.example']).toEqual(['.mixed']);
     expect(result.exceptions['excluded.example']).toEqual(['.mixed']);
+  });
+
+  it('compiles domain rules without redundant children or covered domains', () => {
+    const rules = compileDomainRules([
+      'sub.covered.com', 'ads.example.com', 'pixel.ads.example.com',
+      'tracker.test', 'tracker.test', 'localhost'
+    ], { coveredDomains: ['covered.com'] });
+    expect(rules.map((rule) => rule.condition.requestDomains[0])).toEqual(['ads.example.com', 'tracker.test']);
+    expect(rules.map((rule) => rule.id)).toEqual([1, 2]);
   });
 
   it('reads hosts entries and ignores local addresses and comments', () => {

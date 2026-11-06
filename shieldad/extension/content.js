@@ -11,13 +11,16 @@
   let frame = 0;
 
   function installCss() {
-    selectors = selectors.filter((selector) => {
+    selectors = [...new Set(selectors)].filter((selector) => {
       try { root.matches(selector); return true; } catch { return false; }
     });
     selectorBatches = [];
-    for (let index = 0; index < selectors.length; index += 150) selectorBatches.push(selectors.slice(index, index + 150).join(','));
-    // One selector per rule prevents an unsupported selector from invalidating other rules.
-    style.textContent = selectors.map((selector) => `${selector}{display:none !important;}`).join('\n');
+    // Validation above lets us safely group 600 selectors per CSS rule. This reduces
+    // thousands of CSSOM rules and observer queries to a few efficient batches.
+    for (let index = 0; index < selectors.length; index += 600) {
+      selectorBatches.push(selectors.slice(index, index + 600).join(','));
+    }
+    style.textContent = selectorBatches.map((batch) => `${batch}{display:none !important;}`).join('\n');
   }
 
   function hideWithin(addedRoot) {
@@ -30,14 +33,26 @@
 
   function flush() {
     frame = 0;
-    const roots = [...queued];
+    const roots = [...queued].filter((node) => node.isConnected);
+    const rootSet = new Set(roots);
     queued = new Set();
-    for (const addedRoot of roots) hideWithin(addedRoot);
+    for (const addedRoot of roots) {
+      // A parent query already includes this node; avoid rescanning nested additions.
+      let ancestor = addedRoot.parentElement;
+      let covered = false;
+      while (ancestor) {
+        if (rootSet.has(ancestor)) { covered = true; break; }
+        ancestor = ancestor.parentElement;
+      }
+      if (!covered) hideWithin(addedRoot);
+    }
   }
 
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) if (node.nodeType === Node.ELEMENT_NODE) queued.add(node);
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType === Node.ELEMENT_NODE && node !== style) queued.add(node);
+      }
     }
     if (queued.size && !frame) frame = requestAnimationFrame(flush);
   });
@@ -46,6 +61,8 @@
     selectors = Array.isArray(response?.selectors) ? response.selectors.filter((item) => typeof item === 'string') : [];
     installCss();
     hideWithin(root);
+    // The stylesheet catches late elements natively; the observer adds an inline-style
+    // fallback for pages that manipulate styles or shadow existing ad containers.
     observer.observe(root, { childList: true, subtree: true });
   }).catch(() => style.remove());
 })();

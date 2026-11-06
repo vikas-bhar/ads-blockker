@@ -45,13 +45,14 @@ npm run build:extension
 
 ### Shared list pipeline
 
-The downloader reads the official raw GitHub sources for EasyList, EasyList's cosmetic component, EasyPrivacy, and StevenBlack's unified hosts file. If a raw GitHub host is unavailable, it retries through the GitHub Contents API. Failed downloads are fatal; ShieldAd never silently substitutes stale or sample data.
+The downloader reads the official raw GitHub sources for EasyList's general, ad-server, third-party, site-specific, and allowlist components; EasyPrivacy's general, specific, third-party, tracking-server, and allowlist components; and StevenBlack's unified hosts file. If a raw GitHub host is unavailable, it retries through the GitHub Contents API. Failed downloads are fatal; ShieldAd never silently substitutes stale or sample data.
 
 Generated files:
 
 | File | Contents |
 | --- | --- |
-| `extension/rulesets/ads.json` | Deduplicated DNR block/allow rules, capped at 29,000 and ordered to preserve exceptions and prioritize domain rules |
+| `extension/rulesets/ads.json` | Up to 29,000 deduplicated DNR block/allow rules; exceptions are preserved and a quarter of the regular budget is reserved for URL patterns |
+| `extension/rulesets/domains.json` | Up to 29,000 additional, non-overlapping domain rules compiled from hosts and network sources, with redundant child domains removed |
 | `extension/cosmetic.json` | Global selectors, per-domain selectors, and `#@#` exceptions |
 | `android/app/src/main/assets/blocklist.txt` | Sorted, deduplicated domains from hosts entries and `||domain^` filters |
 
@@ -82,9 +83,9 @@ npm test
 2. Choose **Load Temporary Add-on** and select `dist/shieldad-firefox/manifest.json`.
 3. For permanent installation, sign `dist/shieldad-firefox-1.0.0.zip` through addons.mozilla.org or your enterprise add-on signing process.
 
-The popup provides global protection, per-site pause, the current tab's DNR action count, and filter updates. Static rules ship in the extension package. The update button downloads the project's compiled lists and installs up to 3,500 refreshed dynamic rules while leaving room for custom and per-site rules. The options page stores custom rules and the allowlist in `chrome.storage.sync`, subject to the browser's normal sync-storage quotas.
+The popup provides global protection, per-site pause, the current tab's DNR action count, and filter updates. Both static rulesets ship in the extension package and are enabled or disabled together. The update button downloads the project's compiled lists and installs up to 3,500 supplementary dynamic rules (2,500 network and 1,000 domain rules) while leaving room for custom and per-site rules. The options page stores custom rules and the allowlist in `chrome.storage.sync`, subject to the browser's normal sync-storage quotas.
 
-Cosmetic rules are injected at `document_start`. A `MutationObserver` processes late-added elements in animation-frame batches. YouTube support is deliberately limited to hiding ad slots and promotional containers; ShieldAd does not alter video playback or circumvent playback restrictions.
+Cosmetic rules are injected at `document_start`. Selectors are validated and grouped into batches of 600, substantially reducing CSSOM rules and selector queries. A `MutationObserver` processes late-added elements in animation-frame batches and skips nested roots already covered by a parent scan. YouTube support is deliberately limited to hiding ad slots and promotional containers; ShieldAd does not alter video playback or circumvent playback restrictions.
 
 ## Android
 
