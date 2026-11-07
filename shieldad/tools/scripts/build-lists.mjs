@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   compileCosmeticRules,
+  compileDomainRules,
   compileNetworkRules,
   domainFromNetworkFilter,
   parseHostsLine
@@ -12,12 +13,34 @@ import {
 
 const execFileAsync = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const EASYLIST = 'https://raw.githubusercontent.com/easylist/easylist/master';
 const SOURCES = {
-  easylist: 'https://raw.githubusercontent.com/easylist/easylist/master/easylist/easylist_general_block.txt',
-  'easylist-cosmetic': 'https://raw.githubusercontent.com/easylist/easylist/master/easylist/easylist_general_hide.txt',
-  easyprivacy: 'https://raw.githubusercontent.com/easylist/easylist/master/easyprivacy/easyprivacy_general.txt',
+  easylist: `${EASYLIST}/easylist/easylist_general_block.txt`,
+  'easylist-dimensions': `${EASYLIST}/easylist/easylist_general_block_dimensions.txt`,
+  'easylist-adservers': `${EASYLIST}/easylist/easylist_adservers.txt`,
+  'easylist-specific': `${EASYLIST}/easylist/easylist_specific_block.txt`,
+  'easylist-thirdparty': `${EASYLIST}/easylist/easylist_thirdparty.txt`,
+  'easylist-allowlist': `${EASYLIST}/easylist/easylist_allowlist.txt`,
+  'easylist-allowlist-dimensions': `${EASYLIST}/easylist/easylist_allowlist_dimensions.txt`,
+  'easylist-cosmetic': `${EASYLIST}/easylist/easylist_general_hide.txt`,
+  'easylist-specific-cosmetic': `${EASYLIST}/easylist/easylist_specific_hide.txt`,
+  'easylist-cosmetic-allowlist': `${EASYLIST}/easylist/easylist_allowlist_general_hide.txt`,
+  easyprivacy: `${EASYLIST}/easyprivacy/easyprivacy_general.txt`,
+  'easyprivacy-specific': `${EASYLIST}/easyprivacy/easyprivacy_specific.txt`,
+  'easyprivacy-thirdparty': `${EASYLIST}/easyprivacy/easyprivacy_thirdparty.txt`,
+  'easyprivacy-trackingservers': `${EASYLIST}/easyprivacy/easyprivacy_trackingservers.txt`,
+  'easyprivacy-trackingservers-general': `${EASYLIST}/easyprivacy/easyprivacy_trackingservers_general.txt`,
+  'easyprivacy-trackingservers-thirdparty': `${EASYLIST}/easyprivacy/easyprivacy_trackingservers_thirdparty.txt`,
+  'easyprivacy-allowlist': `${EASYLIST}/easyprivacy/easyprivacy_allowlist.txt`,
   hosts: 'https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts'
 };
+const NETWORK_SOURCES = [
+  'easylist', 'easylist-dimensions', 'easylist-adservers', 'easylist-specific', 'easylist-thirdparty',
+  'easylist-allowlist', 'easylist-allowlist-dimensions', 'easyprivacy', 'easyprivacy-specific',
+  'easyprivacy-thirdparty', 'easyprivacy-trackingservers', 'easyprivacy-trackingservers-general',
+  'easyprivacy-trackingservers-thirdparty', 'easyprivacy-allowlist'
+];
+const COSMETIC_SOURCES = ['easylist-cosmetic', 'easylist-specific-cosmetic', 'easylist-cosmetic-allowlist'];
 
 function apiFallback(rawUrl) {
   const url = new URL(rawUrl);
@@ -28,12 +51,18 @@ function apiFallback(rawUrl) {
 async function fetchList(name, url) {
   if (process.env.SHIELDAD_OFFLINE_FIXTURES === '1') {
     const fixture = path.join(ROOT, 'tools/fixtures', `${name}.txt`);
-    console.log(`[offline] ${name}: ${fixture}`);
-    return readFile(fixture, 'utf8');
+    try {
+      const text = await readFile(fixture, 'utf8');
+      console.log(`[offline] ${name}: ${fixture}`);
+      return text;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      return '! Optional component is not needed by the deterministic fixture set.\n';
+    }
   }
   const attempts = [
-    { url, headers: { 'User-Agent': 'ShieldAd/1.0' } },
-    { url: apiFallback(url), headers: { 'User-Agent': 'ShieldAd/1.0', Accept: 'application/vnd.github.raw+json' } }
+    { url, headers: { 'User-Agent': 'ShieldAd/1.1' } },
+    { url: apiFallback(url), headers: { 'User-Agent': 'ShieldAd/1.1', Accept: 'application/vnd.github.raw+json' } }
   ];
   const errors = [];
   for (const attempt of attempts) {
@@ -43,7 +72,7 @@ async function fetchList(name, url) {
         const response = await fetch(attempt.url, { headers: attempt.headers, signal: AbortSignal.timeout(45000) });
         if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
         text = await response.text();
-      } catch (fetchError) {
+      } catch {
         // Some CI images provide a custom CA to curl but not to Node. curl uses the
         // system trust store and provides an equivalent, timeout-bounded transport.
         const headers = Object.entries(attempt.headers).flatMap(([key, value]) => ['-H', `${key}: ${value}`]);
@@ -62,13 +91,14 @@ async function fetchList(name, url) {
   throw new Error(`Unable to download ${name}.\n${errors.join('\n')}`);
 }
 
-const [easylist, easylistCosmetic, easyprivacy, hosts] = await Promise.all(
-  Object.entries(SOURCES).map(([name, url]) => fetchList(name, url))
-);
-const networkLines = `${easylist}\n${easyprivacy}`.split(/\r?\n/);
-const cosmeticLines = `${easylist}\n${easylistCosmetic}\n${easyprivacy}`.split(/\r?\n/);
+const downloaded = Object.fromEntries(await Promise.all(
+  Object.entries(SOURCES).map(async ([name, url]) => [name, await fetchList(name, url)])
+));
+const linesFor = (names) => names.flatMap((name) => downloaded[name].split(/\r?\n/));
+const networkLines = linesFor(NETWORK_SOURCES);
+const cosmeticLines = [...networkLines, ...linesFor(COSMETIC_SOURCES)];
 const rules = compileNetworkRules(networkLines, { limit: 29000 });
-if (rules.length > 29999) throw new Error('Static ruleset exceeds the 30,000-rule budget');
+if (rules.length > 29999) throw new Error('Main static ruleset exceeds the 30,000-rule budget');
 
 const youtubeSelectors = [
   'ytd-ad-slot-renderer',
@@ -83,18 +113,24 @@ const youtube = new Set([...(cosmetic.domains['youtube.com'] || []), ...youtubeS
 cosmetic.domains['youtube.com'] = [...youtube].sort();
 
 const domainSet = new Set();
-for (const line of hosts.split(/\r?\n/)) {
-  const domain = parseHostsLine(line);
-  if (domain) domainSet.add(domain);
-}
-for (const line of networkLines) {
-  const domain = domainFromNetworkFilter(line);
-  if (domain) domainSet.add(domain);
-}
+const domainCandidates = [];
+const addDomain = (domain) => {
+  if (!domain) return;
+  domainSet.add(domain);
+  domainCandidates.push(domain);
+};
+for (const line of downloaded.hosts.split(/\r?\n/)) addDomain(parseHostsLine(line));
+for (const line of networkLines) addDomain(domainFromNetworkFilter(line));
 const domains = [...domainSet].sort();
+// Only unrestricted domain blocks make another domain ruleset redundant.
+const coveredDomains = rules
+  .filter((rule) => rule.action.type === 'block' && rule.condition.requestDomains && !rule.condition.resourceTypes && !rule.condition.excludedResourceTypes)
+  .flatMap((rule) => rule.condition.requestDomains);
+const domainRules = compileDomainRules(domainCandidates, { limit: 29000, coveredDomains });
 
 const output = [
   [path.join(ROOT, 'extension/rulesets/ads.json'), `${JSON.stringify(rules)}\n`],
+  [path.join(ROOT, 'extension/rulesets/domains.json'), `${JSON.stringify(domainRules)}\n`],
   [path.join(ROOT, 'extension/cosmetic.json'), `${JSON.stringify(cosmetic)}\n`],
   [path.join(ROOT, 'android/app/src/main/assets/blocklist.txt'), `${domains.join('\n')}\n`]
 ];
@@ -103,4 +139,4 @@ await Promise.all(output.map(async ([filename, contents]) => {
   await writeFile(filename, contents);
 }));
 
-console.log(`Built ${rules.length.toLocaleString()} network rules, ${cosmetic.global.length.toLocaleString()} global cosmetic selectors, and ${domains.length.toLocaleString()} DNS domains.`);
+console.log(`Built ${rules.length.toLocaleString()} network rules, ${domainRules.length.toLocaleString()} additional domain rules, ${cosmetic.global.length.toLocaleString()} global cosmetic selectors, and ${domains.length.toLocaleString()} DNS domains.`);

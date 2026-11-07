@@ -6,6 +6,9 @@ const ALL_RESOURCES = ['main_frame', 'sub_frame', 'stylesheet', 'script', 'image
 const UPDATE_BASE = 'https://raw.githubusercontent.com/vikas-bhar/ads-blockker/main/shieldad/extension';
 const UPDATE_START = 600000;
 const UPDATE_LIMIT = 3500;
+const NETWORK_UPDATE_LIMIT = 2500;
+const DOMAIN_UPDATE_LIMIT = 1000;
+const STATIC_RULESETS = ['ads', 'domains'];
 const PAUSE_START = 300000;
 const ALLOW_START = 400000;
 const GLOBAL_OFF_ID = 999999;
@@ -48,8 +51,8 @@ async function reconcileRules() {
     addRules: rules
   });
   await api.declarativeNetRequest.updateEnabledRulesets({
-    enableRulesetIds: value.enabled ? ['ads'] : [],
-    disableRulesetIds: value.enabled ? [] : ['ads']
+    enableRulesetIds: value.enabled ? STATIC_RULESETS : [],
+    disableRulesetIds: value.enabled ? [] : STATIC_RULESETS
   });
 }
 
@@ -66,19 +69,25 @@ async function loadCosmetic() {
 }
 
 async function updateFilters() {
-  const [rulesResponse, cosmeticResponse] = await Promise.all([
+  const [rulesResponse, domainsResponse, cosmeticResponse] = await Promise.all([
     fetch(`${UPDATE_BASE}/rulesets/ads.json`, { cache: 'no-store' }),
+    fetch(`${UPDATE_BASE}/rulesets/domains.json`, { cache: 'no-store' }),
     fetch(`${UPDATE_BASE}/cosmetic.json`, { cache: 'no-store' })
   ]);
-  if (!rulesResponse.ok || !cosmeticResponse.ok) throw new Error('Filter server is unavailable');
+  if (!rulesResponse.ok || !domainsResponse.ok || !cosmeticResponse.ok) throw new Error('Filter server is unavailable');
   const downloaded = await rulesResponse.json();
+  const downloadedDomains = await domainsResponse.json();
   const cosmetics = await cosmeticResponse.json();
-  if (!Array.isArray(downloaded) || !cosmetics || !Array.isArray(cosmetics.global)) throw new Error('Invalid filter update');
-  const updatedRules = downloaded.slice(0, UPDATE_LIMIT).map((rule, index) => ({
+  if (!Array.isArray(downloaded) || !Array.isArray(downloadedDomains) || !cosmetics || !Array.isArray(cosmetics.global)) throw new Error('Invalid filter update');
+  const normalize = (rule, index) => ({
     ...rule,
     id: UPDATE_START + index,
     priority: Math.max(1, Math.min(Number(rule.priority) || 1, 500))
-  }));
+  });
+  const updatedRules = [
+    ...downloaded.slice(0, NETWORK_UPDATE_LIMIT).map(normalize),
+    ...downloadedDomains.slice(0, DOMAIN_UPDATE_LIMIT).map((rule, index) => normalize(rule, NETWORK_UPDATE_LIMIT + index))
+  ];
   if (updatedRules.some((rule) => !rule.condition || !['block', 'allow'].includes(rule.action?.type))) throw new Error('Invalid network rules');
   await api.storage.local.set({ updatedRules, cosmeticOverride: cosmetics, lastUpdate: Date.now() });
   cosmeticCache = cosmetics;

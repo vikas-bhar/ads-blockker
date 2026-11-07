@@ -64,6 +64,7 @@ export function parseNetworkFilter(input) {
       thirdParty = negated ? 'firstParty' : 'thirdParty';
       continue;
     }
+    if (name === 'all' && !negated) continue;
     if (name === 'domain') {
       if (!value || negated) return null;
       const included = [];
@@ -165,10 +166,44 @@ export function compileNetworkRules(lines, { limit = 29000 } = {}) {
     seen.add(signature);
     candidates.push(parsed);
   }
-  // Exceptions are retained first so a truncated list never loses its safety valves.
-  const rank = (rule) => `${rule.exception ? 0 : 1}:${rule.domainOnly ? 0 : 1}`;
-  candidates.sort((a, b) => rank(a).localeCompare(rank(b)));
-  return candidates.slice(0, limit).map(({ exception, domainOnly, ...rule }, index) => ({ id: index + 1, ...rule }));
+  // Keep every possible exception, prioritize domain rules, and reserve a quarter
+  // of the remaining budget for path/wildcard rules that domains cannot replace.
+  const exceptions = candidates.filter((rule) => rule.exception);
+  const domains = candidates.filter((rule) => !rule.exception && rule.domainOnly);
+  const urls = candidates.filter((rule) => !rule.exception && !rule.domainOnly);
+  const selected = exceptions.slice(0, limit);
+  let remaining = limit - selected.length;
+  const urlBudget = Math.min(urls.length, Math.floor(remaining / 4));
+  const domainBudget = remaining - urlBudget;
+  selected.push(...domains.splice(0, domainBudget), ...urls.splice(0, urlBudget));
+  remaining = limit - selected.length;
+  selected.push(...[...domains, ...urls].slice(0, remaining));
+  return selected.map(({ exception, domainOnly, ...rule }, index) => ({ id: index + 1, ...rule }));
+}
+
+/** Compile a memory-efficient domain ruleset, skipping domains already covered by a parent. */
+export function compileDomainRules(domains, { limit = 29000, coveredDomains = [] } = {}) {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 29999) throw new Error('Rule limit must be between 1 and 29,999');
+  const covered = new Set(coveredDomains.map((domain) => String(domain).toLowerCase()));
+  const seen = new Set();
+  const hasParent = (domain, set) => {
+    let current = domain;
+    while (true) {
+      if (set.has(current)) return true;
+      const dot = current.indexOf('.');
+      if (dot < 0) return false;
+      current = current.slice(dot + 1);
+    }
+  };
+  const rules = [];
+  for (const entry of domains) {
+    const domain = String(entry).trim().toLowerCase().replace(/\.$/, '');
+    if (!validDomain(domain) || !domain.includes('.') || hasParent(domain, covered) || hasParent(domain, seen)) continue;
+    seen.add(domain);
+    rules.push({ id: rules.length + 1, priority: 1, action: { type: 'block' }, condition: { requestDomains: [domain] } });
+    if (rules.length === limit) break;
+  }
+  return rules;
 }
 
 export function compileCosmeticRules(lines, { generatedAt = new Date().toISOString() } = {}) {

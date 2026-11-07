@@ -43,9 +43,12 @@ function icon(size) {
   return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))]);
 }
 
-const rules = JSON.parse(await readFile(path.join(SOURCE, 'rulesets/ads.json'), 'utf8'));
-if (!Array.isArray(rules) || !rules.length || rules.length > 29999) throw new Error('Run npm run build-lists first; ads.json must contain 1–29,999 rules');
-if (new Set(rules.map((rule) => rule.id)).size !== rules.length) throw new Error('Duplicate DNR rule IDs');
+const RULESETS = ['ads', 'domains'];
+for (const name of RULESETS) {
+  const rules = JSON.parse(await readFile(path.join(SOURCE, `rulesets/${name}.json`), 'utf8'));
+  if (!Array.isArray(rules) || !rules.length || rules.length > 29999) throw new Error(`Run npm run build-lists first; ${name}.json must contain 1–29,999 rules`);
+  if (new Set(rules.map((rule) => rule.id)).size !== rules.length) throw new Error(`Duplicate DNR rule IDs in ${name}.json`);
+}
 await rm(DIST, { recursive: true, force: true });
 await mkdir(DIST, { recursive: true });
 await mkdir(path.join(SOURCE, 'icons'), { recursive: true });
@@ -57,7 +60,7 @@ for (const browser of ['chrome', 'firefox']) {
   await mkdir(path.join(target, 'icons'), { recursive: true });
   for (const file of FILES) await copyFile(path.join(SOURCE, file), path.join(target, file));
   await copyFile(path.join(ROOT, 'tools/src/filter-parser.mjs'), path.join(target, 'filter-parser.js'));
-  await copyFile(path.join(SOURCE, 'rulesets/ads.json'), path.join(target, 'rulesets/ads.json'));
+  for (const name of RULESETS) await copyFile(path.join(SOURCE, `rulesets/${name}.json`), path.join(target, `rulesets/${name}.json`));
   for (const size of [16, 32, 48, 128]) await copyFile(path.join(SOURCE, `icons/icon-${size}.png`), path.join(target, `icons/icon-${size}.png`));
   const manifest = await readFile(path.join(SOURCE, `manifest.${browser}.json`), 'utf8');
   JSON.parse(manifest);

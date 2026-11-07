@@ -20,7 +20,10 @@
     "all_frames": true
   }],
   "declarative_net_request": {
-    "rule_resources": [{ "id": "ads", "enabled": true, "path": "rulesets/ads.json" }]
+    "rule_resources": [
+      { "id": "ads", "enabled": true, "path": "rulesets/ads.json" },
+      { "id": "domains", "enabled": true, "path": "rulesets/domains.json" }
+    ]
   },
   "browser_specific_settings": {
     "gecko": { "id": "shieldad@shieldad.org", "strict_min_version": "115.0" }
