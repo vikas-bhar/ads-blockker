@@ -42,6 +42,14 @@ jobs:
           xvfb-run -a env SHIELDAD_HEADFUL=1 CHROME_BIN="$CHROME_BIN" npm run test:browser > browser-test.log 2>&1
           status=$?
           cat browser-test.log
+          if [ "$status" -eq 0 ]; then
+            {
+              echo '### Real Chrome blocking evidence'
+              echo '```text'
+              cat browser-test.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ "$status" -ne 0 ]; then
             {
               echo '### Chrome integration failure'
@@ -86,6 +94,11 @@ jobs:
         with:
           name: shieldad-extensions
           path: shieldad/dist/*.zip
+      - name: Upload real Chrome evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: shieldad-browser-evidence
+          path: shieldad/browser-test.log
       - name: Upload Android APKs
         uses: actions/upload-artifact@v7
         with:
