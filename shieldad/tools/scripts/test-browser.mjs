@@ -76,22 +76,31 @@ try {
     ]
   });
   let extensionTarget;
-  try {
-    extensionTarget = await browser.waitForTarget(
-      (target) => target.type() === 'service_worker' && target.url().endsWith('/background.js'),
-      { timeout: 20000 }
-    );
-  } catch (error) {
-    console.error('Extension service worker not found. Browser targets:', browser.targets().map((target) => ({ type: target.type(), url: target.url() })));
-    throw error;
+  let worker;
+  for (let attempt = 0; attempt < 80 && !worker; attempt += 1) {
+    for (const target of browser.targets()) {
+      if (target.type() !== 'service_worker' || !target.url().startsWith('chrome-extension://') || !target.url().endsWith('/background.js')) continue;
+      const candidate = await target.worker();
+      const name = await candidate.evaluate(() => chrome.runtime?.getManifest?.().name).catch(() => '');
+      if (name === 'ShieldAd') {
+        extensionTarget = target;
+        worker = candidate;
+        break;
+      }
+    }
+    if (!worker) await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  if (!worker) {
+    console.error('ShieldAd service worker not found. Browser targets:', browser.targets().map((target) => ({ type: target.type(), url: target.url() })));
+    throw new Error('ShieldAd extension service worker did not start');
   }
   const extensionId = new URL(extensionTarget.url()).hostname;
-  let worker = await extensionTarget.worker();
   const diagnostics = await worker.evaluate(() => ({
     url: globalThis.location.href,
     userAgent: navigator.userAgent,
-    manifest: chrome.runtime.getManifest(),
-    chromeApis: Object.keys(chrome).sort(),
+    name: chrome.runtime.getManifest().name,
+    version: chrome.runtime.getManifest().version,
+    permissions: chrome.runtime.getManifest().permissions,
     dnrType: typeof chrome.declarativeNetRequest
   }));
   console.log('Worker diagnostics:', JSON.stringify(diagnostics, null, 2));
