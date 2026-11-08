@@ -29,14 +29,17 @@ jobs:
       - name: Compile lists and package browser extensions
         working-directory: shieldad
         run: npm run build
+      - name: Install Chrome for Testing
+        working-directory: shieldad
+        run: npx @puppeteer/browsers install chrome@stable --path "$RUNNER_TEMP/shieldad-chrome"
       - name: Verify blocking in real Chrome
         working-directory: shieldad
         shell: bash
-        env:
-          CHROME_BIN: /usr/bin/google-chrome
         run: |
           set +e
-          xvfb-run -a env SHIELDAD_HEADFUL=1 npm run test:browser > browser-test.log 2>&1
+          CHROME_BIN=$(find "$RUNNER_TEMP/shieldad-chrome" -type f -path '*/chrome-linux64/chrome' -print -quit)
+          if [ -z "$CHROME_BIN" ]; then echo 'Chrome for Testing executable was not installed'; exit 1; fi
+          xvfb-run -a env SHIELDAD_HEADFUL=1 CHROME_BIN="$CHROME_BIN" npm run test:browser > browser-test.log 2>&1
           status=$?
           cat browser-test.log
           if [ "$status" -ne 0 ]; then

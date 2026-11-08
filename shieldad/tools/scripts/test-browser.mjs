@@ -67,6 +67,7 @@ try {
     headless: process.env.SHIELDAD_HEADFUL !== '1',
     userDataDir: profile,
     dumpio: process.env.SHIELDAD_BROWSER_LOG === '1',
+    ignoreDefaultArgs: ['--disable-extensions', '--disable-component-extensions-with-background-pages'],
     args: [
       '--no-sandbox', '--no-proxy-server', '--disable-dev-shm-usage',
       `--host-resolver-rules=${mappedHosts}`,
