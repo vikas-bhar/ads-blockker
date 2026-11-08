@@ -149,7 +149,51 @@ try {
   assert.equal(requests.some((entry) => entry.host.startsWith('doubleclick.net:')), false, 'Blocked doubleclick request must not reach the server');
   assert.equal(requests.some((entry) => entry.host.startsWith('amazon-adsystem.com:')), false, 'Blocked Amazon ad request must not reach the server');
   assert.equal(pageErrors.length, 0, `Content script errors: ${pageErrors.join('; ')}`);
-  console.log('PASS: real Chrome blocked both ad domains, hid initial and late cosmetic ads, and allowed safe content.');
+
+  async function waitForProtection(enabled) {
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const state = await worker.evaluate(async () => ({
+        rulesets: await chrome.declarativeNetRequest.getEnabledRulesets(),
+        dynamicIds: (await chrome.declarativeNetRequest.getDynamicRules()).map((rule) => rule.id)
+      }));
+      if (enabled && state.rulesets.includes('ads') && state.rulesets.includes('domains') && !state.dynamicIds.includes(999999)) return;
+      if (!enabled && state.rulesets.length === 0 && state.dynamicIds.includes(999999)) return;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw new Error(`Protection did not settle to ${enabled ? 'enabled' : 'disabled'}`);
+  }
+  async function reloadResults() {
+    await page.reload({ waitUntil: 'load', timeout: 30000 });
+    await page.waitForFunction(() => Object.keys(window.imageResults || {}).length === 3, { timeout: 15000 });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return page.evaluate(() => ({
+      images: window.imageResults,
+      staticAdDisplay: getComputedStyle(document.getElementById('static-ad')).display,
+      lateAdDisplay: getComputedStyle(document.getElementById('ad-slot'))?.display
+    }));
+  }
+
+  await worker.evaluate(() => chrome.storage.sync.set({ enabled: false }));
+  await waitForProtection(false);
+  const disabled = await reloadResults();
+  console.log('Protection disabled evidence:', JSON.stringify(disabled));
+  assert.equal(disabled.images['doubleclick-image'], 'loaded', 'Disabling protection must allow the domain ad request');
+  assert.equal(disabled.images['amazon-image'], 'loaded', 'Disabling protection must allow the network ad request');
+  assert.notEqual(disabled.staticAdDisplay, 'none', 'Disabling protection must restore cosmetic content');
+  assert.notEqual(disabled.lateAdDisplay, 'none', 'Disabling protection must restore late cosmetic content');
+  const allowedAdRequests = requests.filter((entry) => entry.host.startsWith('doubleclick.net:') || entry.host.startsWith('amazon-adsystem.com:')).length;
+  assert.equal(allowedAdRequests, 2, 'Both ad requests should reach the local server only while protection is disabled');
+
+  await worker.evaluate(() => chrome.storage.sync.set({ enabled: true }));
+  await waitForProtection(true);
+  const reenabled = await reloadResults();
+  console.log('Protection re-enabled evidence:', JSON.stringify(reenabled));
+  assert.equal(reenabled.images['doubleclick-image'], 'blocked', 'Re-enabling protection must restore domain blocking');
+  assert.equal(reenabled.images['amazon-image'], 'blocked', 'Re-enabling protection must restore network blocking');
+  assert.equal(reenabled.staticAdDisplay, 'none', 'Re-enabling protection must restore cosmetic blocking');
+  assert.equal(reenabled.lateAdDisplay, 'none', 'Re-enabling protection must hide late cosmetic ads again');
+  assert.equal(requests.filter((entry) => entry.host.startsWith('doubleclick.net:') || entry.host.startsWith('amazon-adsystem.com:')).length, allowedAdRequests, 'No ad request may reach the server after re-enabling');
+  console.log('PASS: real Chrome blocked both ad domains, hid initial and late cosmetic ads, preserved safe content, and restored blocking after an off/on cycle.');
 } finally {
   await browser?.close();
   await new Promise((resolve) => server.close(resolve));
