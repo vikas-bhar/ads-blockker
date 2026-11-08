@@ -39,7 +39,7 @@ jobs:
           set +e
           CHROME_BIN=$(find "$RUNNER_TEMP/shieldad-chrome" -type f -path '*/chrome-linux64/chrome' -print -quit)
           if [ -z "$CHROME_BIN" ]; then echo 'Chrome for Testing executable was not installed'; exit 1; fi
-          xvfb-run -a env SHIELDAD_HEADFUL=1 CHROME_BIN="$CHROME_BIN" npm run test:browser > browser-test.log 2>&1
+          xvfb-run -a env SHIELDAD_HEADFUL=1 SHIELDAD_BROWSER_LOG=1 CHROME_BIN="$CHROME_BIN" npm run test:browser > browser-test.log 2>&1
           status=$?
           cat browser-test.log
           if [ "$status" -ne 0 ]; then

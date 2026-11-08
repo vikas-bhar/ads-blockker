@@ -87,6 +87,15 @@ try {
   }
   const extensionId = new URL(extensionTarget.url()).hostname;
   let worker = await extensionTarget.worker();
+  const diagnostics = await worker.evaluate(() => ({
+    url: globalThis.location.href,
+    userAgent: navigator.userAgent,
+    manifest: chrome.runtime.getManifest(),
+    chromeApis: Object.keys(chrome).sort(),
+    dnrType: typeof chrome.declarativeNetRequest
+  }));
+  console.log('Worker diagnostics:', JSON.stringify(diagnostics, null, 2));
+  assert.equal(diagnostics.dnrType, 'object', 'The declarativeNetRequest API must be available to the extension worker');
   const initial = await worker.evaluate(async () => ({
     enabledRulesets: await chrome.declarativeNetRequest.getEnabledRulesets(),
     availableStaticRules: await chrome.declarativeNetRequest.getAvailableStaticRuleCount(),
