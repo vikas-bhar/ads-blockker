@@ -64,8 +64,9 @@ try {
     .map((host) => `MAP ${host} 127.0.0.1`).join(', ');
   browser = await puppeteer.launch({
     executablePath,
-    headless: true,
+    headless: process.env.SHIELDAD_HEADFUL !== '1',
     userDataDir: profile,
+    dumpio: process.env.SHIELDAD_BROWSER_LOG === '1',
     args: [
       '--no-sandbox', '--no-proxy-server', '--disable-dev-shm-usage',
       `--host-resolver-rules=${mappedHosts}`,
@@ -73,10 +74,16 @@ try {
       `--load-extension=${EXTENSION}`
     ]
   });
-  const extensionTarget = await browser.waitForTarget(
-    (target) => target.type() === 'service_worker' && target.url().endsWith('/background.js'),
-    { timeout: 20000 }
-  );
+  let extensionTarget;
+  try {
+    extensionTarget = await browser.waitForTarget(
+      (target) => target.type() === 'service_worker' && target.url().endsWith('/background.js'),
+      { timeout: 20000 }
+    );
+  } catch (error) {
+    console.error('Extension service worker not found. Browser targets:', browser.targets().map((target) => ({ type: target.type(), url: target.url() })));
+    throw error;
+  }
   const extensionId = new URL(extensionTarget.url()).hostname;
   let worker = await extensionTarget.worker();
   const initial = await worker.evaluate(async () => ({
