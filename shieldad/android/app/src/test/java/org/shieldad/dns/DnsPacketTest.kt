@@ -22,6 +22,9 @@ class DnsPacketTest {
         return output.toByteArray()
     }
 
+    private fun read16(data: ByteArray, offset: Int) =
+        ((data[offset].toInt() and 255) shl 8) or (data[offset + 1].toInt() and 255)
+
     private fun request(version: Int = 4, type: Int = 1): UdpDnsPacket {
         val source = InetAddress.getByName(if (version == 4) "10.0.0.2" else "fd00::3").address
         val destination = InetAddress.getByName(if (version == 4) "10.111.222.2" else "fd00::2").address
@@ -50,7 +53,9 @@ class DnsPacketTest {
         val parsed = DnsPacket.parseDnsQuery(incoming.dnsPayload)!!
         val dns = DnsPacket.buildBlockedResponse(parsed)
         assertEquals(0x1234, (dns[0].toInt() and 255) shl 8 or (dns[1].toInt() and 255))
-        assertEquals(1, dns[7].toInt())
+        assertEquals(1, read16(dns, 6))
+        assertEquals(12 + parsed.encodedQuestion.size + 12 + 4, dns.size)
+        assertEquals(4, read16(dns, dns.size - 6))
         assertArrayEquals(byteArrayOf(0, 0, 0, 0), dns.copyOfRange(dns.size - 4, dns.size))
         val responsePacket = DnsPacket.buildIpUdpResponse(incoming, dns)
         val decoded = DnsPacket.parseIpUdp(responsePacket)
@@ -62,8 +67,10 @@ class DnsPacketTest {
 
     @Test fun `builds AAAA response with sixteen zero bytes`() {
         val incoming = request(version = 6, type = 28)
-        val dns = DnsPacket.buildBlockedResponse(DnsPacket.parseDnsQuery(incoming.dnsPayload)!!)
-        assertEquals(16, dns.size - (12 + DnsPacket.parseDnsQuery(incoming.dnsPayload)!!.encodedQuestion.size + 16))
+        val parsed = DnsPacket.parseDnsQuery(incoming.dnsPayload)!!
+        val dns = DnsPacket.buildBlockedResponse(parsed)
+        assertEquals(12 + parsed.encodedQuestion.size + 12 + 16, dns.size)
+        assertEquals(16, read16(dns, dns.size - 18))
         assertTrue(dns.copyOfRange(dns.size - 16, dns.size).all { it == 0.toByte() })
         assertNotNull(DnsPacket.parseIpUdp(DnsPacket.buildIpUdpResponse(incoming, dns)))
     }
