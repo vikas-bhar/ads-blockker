@@ -83,7 +83,10 @@ jobs:
               tail -n 120 gradle-build.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            tail -n 45 gradle-build.log | while IFS= read -r line; do
+            grep -E '^e: |\.kt:[0-9]+:[0-9]+:|error:' gradle-build.log | tail -n 20 | while IFS= read -r line; do
+              printf '::error::%s\n' "$line"
+            done
+            tail -n 15 gradle-build.log | while IFS= read -r line; do
               if [ -n "$line" ]; then printf '::error::%s\n' "$line"; fi
             done
           fi
