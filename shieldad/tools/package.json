@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "build-lists": "node scripts/build-lists.mjs",
-    "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand"
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
+    "test:browser": "node scripts/test-browser.mjs"
   },
   "devDependencies": {
-    "jest": "^30.5.2"
+    "jest": "^30.5.2",
+    "puppeteer-core": "^25.16.0"
   }
 }

@@ -29,6 +29,28 @@ jobs:
       - name: Compile lists and package browser extensions
         working-directory: shieldad
         run: npm run build
+      - name: Verify blocking in real Chrome
+        working-directory: shieldad
+        shell: bash
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+        run: |
+          set +e
+          npm run test:browser > browser-test.log 2>&1
+          status=$?
+          cat browser-test.log
+          if [ "$status" -ne 0 ]; then
+            {
+              echo '### Chrome integration failure'
+              echo '```text'
+              tail -n 120 browser-test.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            tail -n 45 browser-test.log | while IFS= read -r line; do
+              if [ -n "$line" ]; then printf '::error::%s\n' "$line"; fi
+            done
+          fi
+          exit "$status"
       - uses: actions/setup-java@v6
         with:
           distribution: temurin

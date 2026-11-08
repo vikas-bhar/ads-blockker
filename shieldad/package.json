@@ -12,6 +12,7 @@
     "build-lists": "npm run build-lists --workspace=@shieldad/tools",
     "build:extension": "npm run build --workspace=@shieldad/extension",
     "test": "npm test --workspace=@shieldad/tools",
+    "test:browser": "npm run test:browser --workspace=@shieldad/tools",
     "build": "npm run build-lists && npm run build:extension"
   },
   "engines": {
