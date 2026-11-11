@@ -67,12 +67,14 @@ npm test
 # or: npm test --workspace=@shieldad/tools
 ```
 
-Run real-Chrome extension integration tests (requires full Chrome/Chromium via `CHROME_BIN`):
+Run the real-Chrome integration test with a full Chrome for Testing/Chromium executable (not the headless-shell-only build):
 
 ```bash
+npm run build:extension
 CHROME_BIN=/path/to/chrome npm run test:browser
 ```
 
+The test loads the actual unpacked extension, maps listed ad domains to a local server, and asserts that blocked requests never reach that server. It also checks initial and late-added cosmetic ads, child-combinator and `brand.*` cosmetic rules, `$generichide` protection, global off/on recovery, `allowAllRequests` nested-iframe pause, Popup and Options UI state, custom rules, safe same-site content, all enabled static rulesets, and DNR matched-rule reporting. CI runs it in headful Chrome under Xvfb and uploads the complete log as `shieldad-browser-evidence`.
 ## Browser extension
 
 ### Chrome and Edge

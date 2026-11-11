@@ -105,7 +105,9 @@ object DnsPacket {
     fun buildBlockedResponse(query: DnsQuery): ByteArray {
         require(query.type == TYPE_A || query.type == TYPE_AAAA) { "Only A and AAAA queries have null-address responses" }
         val addressLength = if (query.type == TYPE_A) 4 else 16
-        val output = ByteArray(12 + query.encodedQuestion.size + 16 + addressLength)
+        // Answer fields after the name pointer: TYPE (2), CLASS (2), TTL (4),
+        // RDLENGTH (2), then RDATA. Do not append trailing bytes to the DNS message.
+        val output = ByteArray(12 + query.encodedQuestion.size + 12 + addressLength)
         put16(output, 0, query.id)
         // QR + RA, preserving RD and CD. RCODE is NOERROR.
         put16(output, 2, 0x8080 or (query.flags and 0x0110))

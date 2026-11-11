@@ -45,14 +45,29 @@ jobs:
         working-directory: shieldad
         shell: bash
         run: |
-          set -o pipefail
-          xvfb-run -a npm run test:browser 2>&1 | tee browser-test.log
-          {
-            echo '### Real Chrome extension verification'
-            echo '```text'
-            cat browser-test.log
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          set +e
+          xvfb-run -a npm run test:browser > browser-test.log 2>&1
+          status=$?
+          cat browser-test.log
+          if [ "$status" -eq 0 ]; then
+            {
+              echo '### Real Chrome extension verification'
+              echo '```text'
+              cat browser-test.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo '### Chrome integration failure'
+              echo '```text'
+              tail -n 120 browser-test.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            tail -n 45 browser-test.log | while IFS= read -r line; do
+              if [ -n "$line" ]; then printf '::error::%s\n' "$line"; fi
+            done
+          fi
+          exit "$status"
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -74,7 +89,7 @@ jobs:
               tail -n 120 gradle-build.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            grep -E '(^e: |^> Task .* FAILED|^FAILURE:|^\* What went wrong:|^> |Caused by:)' gradle-build.log | tail -n 30 | while IFS= read -r line; do
+            grep -E '(^e: |\.kt:[0-9]+:[0-9]+:|^> Task .* FAILED|^FAILURE:|^\* What went wrong:|^> |Caused by:)' gradle-build.log | tail -n 30 | while IFS= read -r line; do
               if [ -n "$line" ]; then printf '::error::%s\n' "$line"; fi
             done
           fi

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -8,7 +9,10 @@ import puppeteer from 'puppeteer-core';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const EXT_DIR = path.join(ROOT, 'dist/shieldad-chrome');
-const CHROME_BIN = process.env.CHROME_BIN || process.env.PUPPETEER_EXECUTABLE_PATH;
+const CHROME_BIN = process.env.CHROME_BIN || process.env.PUPPETEER_EXECUTABLE_PATH || [
+  '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+].find((candidate) => existsSync(candidate));
 if (!CHROME_BIN) {
   throw new Error('Set CHROME_BIN to a full Chrome/Chromium binary (Chrome for Testing) before running test:browser');
 }
@@ -197,6 +201,10 @@ async function main() {
     assert.equal(states.lateAd, 'none', 'Late-added .ADBox should be hidden');
     assert.notEqual(states.safeContent, 'none', 'Safe content must remain visible');
     assert.equal(states.safeImgLoaded, true, 'Safe image must load');
+
+    const matched = await worker.evaluate(async () => chrome.declarativeNetRequest.getMatchedRules({}));
+    console.log('Matched DNR rule count:', matched.rulesMatchedInfo.length);
+    assert.ok(matched.rulesMatchedInfo.length >= AD_HOSTS.length, 'DNR must report matched rules for blocked ad hosts');
 
     // 2. Verify brand.* cosmetic rule (tripadvisor.*)
     await page.goto(`http://www.tripadvisor.co.uk:${server.port}/page.html`, { waitUntil: 'networkidle0' });
