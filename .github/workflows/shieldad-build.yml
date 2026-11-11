@@ -65,7 +65,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          ./gradlew --stacktrace --console=plain testDebugUnitTest assembleDebug assembleRelease > gradle-build.log 2>&1
+          ./gradlew --no-daemon --max-workers=2 --console=plain testDebugUnitTest assembleDebug assembleRelease > gradle-build.log 2>&1
           status=$?
           if [ "$status" -ne 0 ]; then
             {
@@ -74,7 +74,7 @@ jobs:
               tail -n 120 gradle-build.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            tail -n 45 gradle-build.log | while IFS= read -r line; do
+            grep -E '(^e: |^> Task .* FAILED|^FAILURE:|^\* What went wrong:|^> |Caused by:)' gradle-build.log | tail -n 30 | while IFS= read -r line; do
               if [ -n "$line" ]; then printf '::error::%s\n' "$line"; fi
             done
           fi
