@@ -22,7 +22,9 @@
   "declarative_net_request": {
     "rule_resources": [
       { "id": "ads", "enabled": true, "path": "rulesets/ads.json" },
-      { "id": "domains", "enabled": true, "path": "rulesets/domains.json" }
+      { "id": "domains", "enabled": true, "path": "rulesets/domains.json" },
+      { "id": "domains_2", "enabled": true, "path": "rulesets/domains_2.json" },
+      { "id": "domains_3", "enabled": true, "path": "rulesets/domains_3.json" }
     ]
   }
 }

@@ -23,7 +23,7 @@ jobs:
       - name: Install Node dependencies
         working-directory: shieldad
         run: npm ci
-      - name: Test filter parser
+      - name: Test filter parser and extension runtime
         working-directory: shieldad
         run: npm test
       - name: Compile lists and package browser extensions
@@ -31,26 +31,32 @@ jobs:
         run: npm run build
       - name: Install Chrome for Testing
         working-directory: shieldad
-        run: npx @puppeteer/browsers install chrome@stable --path "$RUNNER_TEMP/shieldad-chrome"
-      - name: Verify blocking in real Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          sudo npx --yes @puppeteer/browsers install chrome@stable --path /tmp/chrome --install-deps
+          CHROME_BIN="$(find /tmp/chrome -type f -name chrome -perm -111 | head -n 1)"
+          if [ -z "$CHROME_BIN" ]; then
+            echo "Chrome binary not found" >&2
+            exit 1
+          fi
+          echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
+      - name: Verify extension in real Chrome
         working-directory: shieldad
         shell: bash
         run: |
           set +e
-          CHROME_BIN=$(find "$RUNNER_TEMP/shieldad-chrome" -type f -path '*/chrome-linux64/chrome' -print -quit)
-          if [ -z "$CHROME_BIN" ]; then echo 'Chrome for Testing executable was not installed'; exit 1; fi
-          xvfb-run -a env SHIELDAD_HEADFUL=1 CHROME_BIN="$CHROME_BIN" npm run test:browser > browser-test.log 2>&1
+          xvfb-run -a npm run test:browser > browser-test.log 2>&1
           status=$?
           cat browser-test.log
           if [ "$status" -eq 0 ]; then
             {
-              echo '### Real Chrome blocking evidence'
+              echo '### Real Chrome extension verification'
               echo '```text'
               cat browser-test.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [ "$status" -ne 0 ]; then
+          else
             {
               echo '### Chrome integration failure'
               echo '```text'
@@ -74,7 +80,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          ./gradlew --stacktrace --console=plain testDebugUnitTest assembleDebug assembleRelease > gradle-build.log 2>&1
+          ./gradlew --no-daemon --max-workers=2 --console=plain testDebugUnitTest assembleDebug assembleRelease > gradle-build.log 2>&1
           status=$?
           if [ "$status" -ne 0 ]; then
             {
@@ -83,10 +89,7 @@ jobs:
               tail -n 120 gradle-build.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            grep -E '^e: |\.kt:[0-9]+:[0-9]+:|error:' gradle-build.log | tail -n 20 | while IFS= read -r line; do
-              printf '::error::%s\n' "$line"
-            done
-            tail -n 15 gradle-build.log | while IFS= read -r line; do
+            grep -E '(^e: |\.kt:[0-9]+:[0-9]+:|^> Task .* FAILED|^FAILURE:|^\* What went wrong:|^> |Caused by:)' gradle-build.log | tail -n 30 | while IFS= read -r line; do
               if [ -n "$line" ]; then printf '::error::%s\n' "$line"; fi
             done
           fi
@@ -98,6 +101,7 @@ jobs:
           name: shieldad-extensions
           path: shieldad/dist/*.zip
       - name: Upload real Chrome evidence
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: shieldad-browser-evidence

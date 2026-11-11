@@ -5,8 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   compileCosmeticRules,
-  compileDomainRules,
-  compileNetworkRules,
+  compileStaticRulesets,
   domainFromNetworkFilter,
   parseHostsLine
 } from '../src/filter-parser.mjs';
@@ -34,12 +33,13 @@ const SOURCES = {
   'easyprivacy-allowlist': `${EASYLIST}/easyprivacy/easyprivacy_allowlist.txt`,
   hosts: 'https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts'
 };
-const NETWORK_SOURCES = [
-  'easylist', 'easylist-dimensions', 'easylist-adservers', 'easylist-specific', 'easylist-thirdparty',
+const PRIORITY_NETWORK_SOURCES = [
+  'easylist', 'easylist-dimensions', 'easylist-specific', 'easylist-thirdparty',
   'easylist-allowlist', 'easylist-allowlist-dimensions', 'easyprivacy', 'easyprivacy-specific',
   'easyprivacy-thirdparty', 'easyprivacy-trackingservers', 'easyprivacy-trackingservers-general',
   'easyprivacy-trackingservers-thirdparty', 'easyprivacy-allowlist'
 ];
+const NETWORK_SOURCES = [...PRIORITY_NETWORK_SOURCES, 'easylist-adservers'];
 const COSMETIC_SOURCES = ['easylist-cosmetic', 'easylist-specific-cosmetic', 'easylist-cosmetic-allowlist'];
 
 function apiFallback(rawUrl) {
@@ -95,42 +95,64 @@ const downloaded = Object.fromEntries(await Promise.all(
   Object.entries(SOURCES).map(async ([name, url]) => [name, await fetchList(name, url)])
 ));
 const linesFor = (names) => names.flatMap((name) => downloaded[name].split(/\r?\n/));
+const priorityNetworkLines = linesFor(PRIORITY_NETWORK_SOURCES);
+const adserverLines = downloaded['easylist-adservers'].split(/\r?\n/);
 const networkLines = linesFor(NETWORK_SOURCES);
 const cosmeticLines = [...networkLines, ...linesFor(COSMETIC_SOURCES)];
-const rules = compileNetworkRules(networkLines, { limit: 29000 });
+
+const hostsDomains = [];
+for (const line of downloaded.hosts.split(/\r?\n/)) {
+  const parsed = parseHostsLine(line);
+  if (parsed) hostsDomains.push(parsed);
+}
+
+const { ads: rules, domainChunks, stats } = compileStaticRulesets({
+  priorityNetworkLines,
+  adserverLines,
+  hostsDomains,
+  perRulesetLimit: 29000,
+  maxDomainChunks: 3
+});
 if (rules.length > 29999) throw new Error('Main static ruleset exceeds the 30,000-rule budget');
 
 const youtubeSelectors = [
   'ytd-ad-slot-renderer',
+  'ytd-in-feed-ad-layout-renderer',
   'ytd-display-ad-renderer',
+  'ytd-banner-promo-renderer',
+  'ytd-statement-banner-renderer',
+  'ytd-video-masthead-ad-v3-renderer',
+  'ytd-primetime-promo-renderer',
+  'ytd-companion-slot-renderer',
+  'ytd-action-companion-ad-renderer',
+  'ytd-promoted-sparkles-text-search-renderer',
+  'ytd-search-pyv-renderer',
   '.ytd-promoted-sparkles-web-renderer',
   '.ytd-promoted-video-renderer',
   '.ytp-ad-player-overlay',
-  '.ytp-ad-player-overlay-instream-info'
+  '.ytp-ad-player-overlay-instream-info',
+  '#masthead-ad',
+  '#player-ads'
 ];
 const cosmetic = compileCosmeticRules(cosmeticLines);
 const youtube = new Set([...(cosmetic.domains['youtube.com'] || []), ...youtubeSelectors]);
 cosmetic.domains['youtube.com'] = [...youtube].sort();
 
-const domainSet = new Set();
-const domainCandidates = [];
-const addDomain = (domain) => {
-  if (!domain) return;
-  domainSet.add(domain);
-  domainCandidates.push(domain);
-};
-for (const line of downloaded.hosts.split(/\r?\n/)) addDomain(parseHostsLine(line));
-for (const line of networkLines) addDomain(domainFromNetworkFilter(line));
+const domainSet = new Set(hostsDomains);
+for (const line of networkLines) {
+  const d = domainFromNetworkFilter(line);
+  if (d) domainSet.add(d);
+}
 const domains = [...domainSet].sort();
-// Only unrestricted domain blocks make another domain ruleset redundant.
-const coveredDomains = rules
-  .filter((rule) => rule.action.type === 'block' && rule.condition.requestDomains && !rule.condition.resourceTypes && !rule.condition.excludedResourceTypes)
-  .flatMap((rule) => rule.condition.requestDomains);
-const domainRules = compileDomainRules(domainCandidates, { limit: 29000, coveredDomains });
+
+const domainFiles = ['domains.json', 'domains_2.json', 'domains_3.json'].map((filename, index) => [
+  path.join(ROOT, 'extension/rulesets', filename),
+  `${JSON.stringify(domainChunks[index] || [])}\n`
+]);
 
 const output = [
   [path.join(ROOT, 'extension/rulesets/ads.json'), `${JSON.stringify(rules)}\n`],
-  [path.join(ROOT, 'extension/rulesets/domains.json'), `${JSON.stringify(domainRules)}\n`],
+  ...domainFiles,
   [path.join(ROOT, 'extension/cosmetic.json'), `${JSON.stringify(cosmetic)}\n`],
   [path.join(ROOT, 'android/app/src/main/assets/blocklist.txt'), `${domains.join('\n')}\n`]
 ];
@@ -139,4 +161,10 @@ await Promise.all(output.map(async ([filename, contents]) => {
   await writeFile(filename, contents);
 }));
 
-console.log(`Built ${rules.length.toLocaleString()} network rules, ${domainRules.length.toLocaleString()} additional domain rules, ${cosmetic.global.length.toLocaleString()} global cosmetic selectors, and ${domains.length.toLocaleString()} DNS domains.`);
+const totalDomainChunkRules = domainChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+console.log(
+  `Built ${rules.length.toLocaleString()} core rules (${stats.exceptions} allow, ${stats.conditionalDomains} conditional, ${stats.urlRules} url), ` +
+  `${totalDomainChunkRules.toLocaleString()} extra domain rules across ${domainChunks.length} rulesets, ` +
+  `${cosmetic.global.length.toLocaleString()} global cosmetic selectors (${cosmetic.generichide.length} generichide), ` +
+  `and ${domains.length.toLocaleString()} DNS domains.`
+);

@@ -16,8 +16,11 @@
       <button id="power" class="switch on" role="switch" aria-checked="true" aria-label="Global ad protection"><span></span></button>
     </header>
 
-    <section class="count-card" aria-live="polite">
-      <span class="eyebrow">ON THIS TAB</span>
+    <section id="countCard" class="count-card" aria-live="polite">
+      <div class="card-top">
+        <span class="eyebrow">ON THIS TAB</span>
+        <span id="rulesMeta" class="rules-meta"></span>
+      </div>
       <div class="count-line"><strong id="blockedCount">0</strong><span>ads &amp; trackers<br>blocked</span></div>
       <div class="clean-line"><span class="pulse"></span><span id="siteText">Checking this site…</span></div>
     </section>
@@ -27,9 +30,12 @@
       <button id="siteToggle" class="switch" role="switch" aria-checked="false" aria-label="Pause ShieldAd on this site"><span></span></button>
     </section>
 
+    <button id="reloadBtn" class="reload-button" hidden>Reload tab to apply network changes</button>
+
     <button id="update" class="update-button">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span>Update filter lists</span><span id="updateArrow">→</span>
+      <span class="update-label"><span>Update filter lists</span><small id="updateMeta"></small></span>
+      <span id="updateArrow">→</span>
     </button>
     <p id="message" class="message" role="status"></p>
     <footer><span>Local. Private. Open source.</span><button id="options">Settings</button></footer>
