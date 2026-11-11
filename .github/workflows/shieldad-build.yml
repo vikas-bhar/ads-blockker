@@ -23,12 +23,36 @@ jobs:
       - name: Install Node dependencies
         working-directory: shieldad
         run: npm ci
-      - name: Test filter parser
+      - name: Test filter parser and extension runtime
         working-directory: shieldad
         run: npm test
       - name: Compile lists and package browser extensions
         working-directory: shieldad
         run: npm run build
+      - name: Install Chrome for Testing
+        working-directory: shieldad
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          sudo npx --yes @puppeteer/browsers install chrome@stable --path /tmp/chrome --install-deps
+          CHROME_BIN="$(find /tmp/chrome -type f -name chrome -perm -111 | head -n 1)"
+          if [ -z "$CHROME_BIN" ]; then
+            echo "Chrome binary not found" >&2
+            exit 1
+          fi
+          echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
+      - name: Verify extension in real Chrome
+        working-directory: shieldad
+        shell: bash
+        run: |
+          set -o pipefail
+          xvfb-run -a npm run test:browser 2>&1 | tee browser-test.log
+          {
+            echo '### Real Chrome extension verification'
+            echo '```text'
+            cat browser-test.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -61,6 +85,12 @@ jobs:
         with:
           name: shieldad-extensions
           path: shieldad/dist/*.zip
+      - name: Upload real Chrome evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: shieldad-browser-evidence
+          path: shieldad/browser-test.log
       - name: Upload Android APKs
         uses: actions/upload-artifact@v7
         with:

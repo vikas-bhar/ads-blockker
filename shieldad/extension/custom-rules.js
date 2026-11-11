@@ -1,12 +1,65 @@
-import { compileNetworkRules, isValidDomain } from './filter-parser.js';
+import {
+  compileCosmeticRules,
+  compileNetworkRules,
+  isValidDnrRule,
+  normalizeDomainEntry,
+  parseCosmeticControlFilter,
+  parseCosmeticFilter,
+  parseNetworkFilter
+} from './filter-parser.js';
+
+const CUSTOM_PRIORITIES = {
+  blockPriority: 10,
+  importantBlockPriority: 450,
+  allowPriority: 300,
+  importantAllowPriority: 500
+};
 
 export function compileCustomRules(text, startId = 100000, limit = 1000) {
-  return compileNetworkRules(String(text || '').split(/\r?\n/), { limit })
-    .map((rule, index) => ({ ...rule, id: startId + index }));
+  return compileNetworkRules(String(text || '').split(/\r?\n/), { limit, ...CUSTOM_PRIORITIES })
+    .map((rule, index) => ({ ...rule, id: startId + index }))
+    .filter(isValidDnrRule);
+}
+
+export function compileUserRules(text, { startId = 100000, networkLimit = 1000 } = {}) {
+  const lines = String(text || '').split(/\r?\n/);
+  const networkLines = [];
+  const cosmeticLines = [];
+  const invalidLines = [];
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith('!') || line.startsWith('[')) continue;
+    if (parseCosmeticControlFilter(line)) {
+      cosmeticLines.push(line);
+      continue;
+    }
+    if (line.includes('##') || line.includes('#@#')) {
+      if (parseCosmeticFilter(line)) cosmeticLines.push(line);
+      else invalidLines.push(line);
+      continue;
+    }
+    if (parseNetworkFilter(line, CUSTOM_PRIORITIES)) {
+      networkLines.push(line);
+    } else {
+      invalidLines.push(line);
+    }
+  }
+
+  const networkRules = compileNetworkRules(networkLines, { limit: networkLimit, ...CUSTOM_PRIORITIES })
+    .map((rule, index) => ({ ...rule, id: startId + index }))
+    .filter(isValidDnrRule);
+
+  const cosmetic = compileCosmeticRules(cosmeticLines);
+  return { networkRules, cosmetic, invalidLines };
 }
 
 export function normalizeDomainList(value) {
   const entries = Array.isArray(value) ? value : String(value || '').split(/\r?\n/);
-  return [...new Set(entries.map((entry) => String(entry).trim().toLowerCase().replace(/^\*\./, '').replace(/\.$/, ''))
-    .filter((entry) => isValidDomain(entry)))];
+  const normalized = [];
+  for (const entry of entries) {
+    const domain = normalizeDomainEntry(entry);
+    if (domain) normalized.push(domain);
+  }
+  return [...new Set(normalized)];
 }

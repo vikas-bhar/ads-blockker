@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { deflateSync } from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isValidDnrRule } from '../src/filter-parser.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SOURCE = path.join(ROOT, 'extension');
@@ -43,12 +44,30 @@ function icon(size) {
   return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))]);
 }
 
-const RULESETS = ['ads', 'domains'];
-for (const name of RULESETS) {
-  const rules = JSON.parse(await readFile(path.join(SOURCE, `rulesets/${name}.json`), 'utf8'));
-  if (!Array.isArray(rules) || !rules.length || rules.length > 29999) throw new Error(`Run npm run build-lists first; ${name}.json must contain 1–29,999 rules`);
+const ALL_RULESETS = ['ads', 'domains', 'domains_2', 'domains_3'];
+const activeRulesets = [];
+for (const name of ALL_RULESETS) {
+  const filePath = path.join(SOURCE, `rulesets/${name}.json`);
+  let raw;
+  try {
+    raw = await readFile(filePath, 'utf8');
+  } catch (error) {
+    if (name === 'ads' || error.code !== 'ENOENT') throw error;
+    continue;
+  }
+  const rules = JSON.parse(raw);
+  if (!Array.isArray(rules)) throw new Error(`${name}.json must be a JSON array`);
+  if (!rules.length) {
+    if (name === 'ads') throw new Error(`Run npm run build-lists first; ${name}.json must contain 1–29,999 rules`);
+    continue;
+  }
+  if (rules.length > 29999) throw new Error(`${name}.json exceeds 29,999 rules (${rules.length})`);
   if (new Set(rules.map((rule) => rule.id)).size !== rules.length) throw new Error(`Duplicate DNR rule IDs in ${name}.json`);
+  const invalidIndex = rules.findIndex((rule) => !isValidDnrRule(rule));
+  if (invalidIndex >= 0) throw new Error(`Invalid DNR rule in ${name}.json at index ${invalidIndex}`);
+  activeRulesets.push(name);
 }
+
 await rm(DIST, { recursive: true, force: true });
 await mkdir(DIST, { recursive: true });
 await mkdir(path.join(SOURCE, 'icons'), { recursive: true });
@@ -60,13 +79,16 @@ for (const browser of ['chrome', 'firefox']) {
   await mkdir(path.join(target, 'icons'), { recursive: true });
   for (const file of FILES) await copyFile(path.join(SOURCE, file), path.join(target, file));
   await copyFile(path.join(ROOT, 'tools/src/filter-parser.mjs'), path.join(target, 'filter-parser.js'));
-  for (const name of RULESETS) await copyFile(path.join(SOURCE, `rulesets/${name}.json`), path.join(target, `rulesets/${name}.json`));
+  for (const name of activeRulesets) await copyFile(path.join(SOURCE, `rulesets/${name}.json`), path.join(target, `rulesets/${name}.json`));
   for (const size of [16, 32, 48, 128]) await copyFile(path.join(SOURCE, `icons/icon-${size}.png`), path.join(target, `icons/icon-${size}.png`));
-  const manifest = await readFile(path.join(SOURCE, `manifest.${browser}.json`), 'utf8');
-  JSON.parse(manifest);
-  await writeFile(path.join(target, 'manifest.json'), manifest);
+
+  const manifest = JSON.parse(await readFile(path.join(SOURCE, `manifest.${browser}.json`), 'utf8'));
+  manifest.declarative_net_request.rule_resources = manifest.declarative_net_request.rule_resources
+    .filter((entry) => activeRulesets.includes(entry.id));
+  await writeFile(path.join(target, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+
   const archive = path.join(DIST, `shieldad-${browser}-1.0.0.zip`);
   const zipped = spawnSync('zip', ['-q', '-r', archive, '.'], { cwd: target, stdio: 'inherit' });
   if (zipped.status !== 0) throw new Error(`Could not package ${browser} extension`);
-  console.log(`Built ${target} and ${archive}`);
+  console.log(`Built ${target} (${activeRulesets.length} rulesets) and ${archive}`);
 }

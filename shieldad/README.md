@@ -51,20 +51,26 @@ Generated files:
 
 | File | Contents |
 | --- | --- |
-| `extension/rulesets/ads.json` | Up to 29,000 deduplicated DNR block/allow rules; exceptions are preserved and a quarter of the regular budget is reserved for URL patterns |
-| `extension/rulesets/domains.json` | Up to 29,000 additional, non-overlapping domain rules compiled from hosts and network sources, with redundant child domains removed |
-| `extension/cosmetic.json` | Global selectors, per-domain selectors, and `#@#` exceptions |
+| `extension/rulesets/ads.json` | Up to 29,000 high-priority DNR rules (all `@@` exceptions, conditional rules, URL patterns, and top root ad/tracking domains) within Chrome's 30,000 guaranteed static budget |
+| `extension/rulesets/domains.json`, `domains_2.json`, `domains_3.json` | Additional folded domain rules across up to 29,000-rule static rulesets covering remaining EasyList/EasyPrivacy and StevenBlack hosts entries |
+| `extension/cosmetic.json` | Global selectors, per-domain and `brand.*` selectors, `#@#` exceptions, and `$generichide`/`$elemhide` exclusions |
 | `android/app/src/main/assets/blocklist.txt` | Sorted, deduplicated domains from hosts entries and `||domain^` filters |
 
-Supported network syntax includes `||domain^`, URL wildcards and separators, `@@` exceptions, `$third-party`/`$~third-party`, `$domain=`, `$script`, `$image`, `$xmlhttprequest`, and the other basic DNR resource types. Unsupported semantic modifiers (for example redirects) are skipped instead of being compiled with different behavior.
+Supported network syntax includes `||domain^`, URL wildcards and separators, `@@` exceptions, `$third-party`/`$~third-party`, `$important`, `$domain=`, `$script`, `$image`, `$xmlhttprequest`, and the other basic DNR resource types. Unsupported semantic modifiers (for example redirects) are skipped instead of being compiled with different behavior.
 
 For deterministic development only, `SHIELDAD_OFFLINE_FIXTURES=1 npm run build-lists` reads `tools/fixtures/*.txt`. Normal builds always use the live upstream lists.
 
-Run parser tests alone:
+Run parser and runtime tests:
 
 ```bash
 npm test
 # or: npm test --workspace=@shieldad/tools
+```
+
+Run real-Chrome extension integration tests (requires full Chrome/Chromium via `CHROME_BIN`):
+
+```bash
+CHROME_BIN=/path/to/chrome npm run test:browser
 ```
 
 ## Browser extension
@@ -83,9 +89,9 @@ npm test
 2. Choose **Load Temporary Add-on** and select `dist/shieldad-firefox/manifest.json`.
 3. For permanent installation, sign `dist/shieldad-firefox-1.0.0.zip` through addons.mozilla.org or your enterprise add-on signing process.
 
-The popup provides global protection, per-site pause, the current tab's DNR action count, and filter updates. Both static rulesets ship in the extension package and are enabled or disabled together. The update button downloads the project's compiled lists and installs up to 3,500 supplementary dynamic rules (2,500 network and 1,000 domain rules) while leaving room for custom and per-site rules. The options page stores custom rules and the allowlist in `chrome.storage.sync`, subject to the browser's normal sync-storage quotas.
+The popup provides global protection, per-site pause (`allowAllRequests` + request/initiator allow rules so nested third-party iframes are also paused cleanly), Settings allowlist visibility, the current tab's DNR action count, and incremental filter updates. The core `ads` static ruleset fits within the 30,000-rule guaranteed minimum while extra domain rulesets (`domains`, `domains_2`, `domains_3`) are enabled automatically up to the browser's available static quota. The update button downloads the latest compiled lists, installs up to 3,500 newly added delta rules dynamically, disables removed static rules where supported, and refreshes cosmetic lists. The options page supports both custom network and custom cosmetic (`##` / `#@#`) rules, URL-normalized allowlists, paused-site management, and automatic `storage.local` overflow when custom rules exceed `chrome.storage.sync` item quotas.
 
-Cosmetic rules are injected at `document_start`. Selectors are validated and grouped into batches of 600, substantially reducing CSSOM rules and selector queries. A `MutationObserver` processes late-added elements in animation-frame batches and skips nested roots already covered by a parent scan. YouTube support is deliberately limited to hiding ad slots and promotional containers; ShieldAd does not alter video playback or circumvent playback restrictions.
+Cosmetic rules are injected at `document_start` and update dynamically when protection is toggled. Selectors are grouped into 600-selector CSS rules, verified natively via the stylesheet's parsed rules (falling back to binary batch repair only if a browser rejects a selector), and guarded against stylesheet removal. A `MutationObserver` processes late-added elements in animation-frame batches, skips nested roots already covered by a parent scan, and respects `$generichide`/`$elemhide` directives. YouTube support is deliberately limited to hiding ad slots and promotional containers; ShieldAd does not alter video playback or circumvent playback restrictions.
 
 ## Android
 
