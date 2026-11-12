@@ -373,7 +373,7 @@ async function main() {
     await optionsPage.$eval('#customRules', (el) => {
       el.value = [
         '||custom-blocked.test^',
-        '||custom-redirected.test/tag.js$script,redirect=noop.js',
+        '||custom-redirected.test^*/tag.js$script,redirect=noop.js',
         'news.shieldad.test##.custom-hidden-slot',
         'news.shieldad.test#?#article:has-text(Sponsored Partner)',
         'news.shieldad.test##div#cosmetic-styled:style(opacity: 0.5 !important)'
