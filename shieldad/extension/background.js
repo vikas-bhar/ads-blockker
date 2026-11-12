@@ -12,6 +12,17 @@ const ALLOW_START = 400000;
 const GLOBAL_OFF_ID = 999999;
 const SYNC_CUSTOM_RULE_BYTE_LIMIT = 7000;
 const MAX_DISABLED_STATIC_RULES = 4500;
+const SCRIPTLET_ID = 'shieldad-scriptlets';
+const YOUTUBE_EXCLUDE_MATCHES = [
+  '*://youtube.com/*',
+  '*://*.youtube.com/*',
+  '*://youtube-nocookie.com/*',
+  '*://*.youtube-nocookie.com/*',
+  '*://youtubekids.com/*',
+  '*://*.youtubekids.com/*',
+  '*://youtu.be/*',
+  '*://*.youtu.be/*'
+];
 
 let cosmeticCache;
 let cosmeticIndex;
@@ -157,6 +168,44 @@ async function enableStaticRulesets(enabled) {
   }
 }
 
+function buildExcludeMatches(value) {
+  const patterns = new Set(YOUTUBE_EXCLUDE_MATCHES);
+  for (const domain of [...value.pausedSites, ...value.allowlist].slice(0, 100)) {
+    patterns.add(`*://${domain}/*`);
+    patterns.add(`*://*.${domain}/*`);
+  }
+  return [...patterns];
+}
+
+async function reconcileScriptlets(value) {
+  if (!api.scripting?.registerContentScripts) return;
+  try {
+    if (!value.enabled) {
+      await api.scripting.unregisterContentScripts({ ids: [SCRIPTLET_ID] }).catch(() => {});
+      return;
+    }
+    const excludeMatches = buildExcludeMatches(value);
+    const existing = await api.scripting.getRegisteredContentScripts?.({ ids: [SCRIPTLET_ID] }).catch(() => []);
+    const desired = {
+      id: SCRIPTLET_ID,
+      matches: ['http://*/*', 'https://*/*'],
+      excludeMatches,
+      js: ['scriptlets-data.js', 'scriptlets.js'],
+      runAt: 'document_start',
+      allFrames: true,
+      world: 'MAIN'
+    };
+    if (Array.isArray(existing) && existing.length) {
+      const prev = existing[0];
+      if (JSON.stringify(prev.excludeMatches || []) === JSON.stringify(excludeMatches)) return;
+      await api.scripting.unregisterContentScripts({ ids: [SCRIPTLET_ID] }).catch(() => {});
+    }
+    await api.scripting.registerContentScripts([desired]);
+  } catch (error) {
+    console.warn('MAIN-world scriptlets unavailable:', error.message);
+  }
+}
+
 async function configureBadge(enabled = true) {
   try {
     if (!enabled) {
@@ -229,6 +278,7 @@ async function doReconcile() {
   }
 
   await enableStaticRulesets(value.enabled);
+  await reconcileScriptlets(value);
   await configureBadge(value.enabled);
   return { appliedCustom, compiled };
 }
@@ -239,6 +289,14 @@ function reconcileRules() {
   return next;
 }
 
+function indexDomainMap(rawObj, exactMap, wildcardList) {
+  for (const [domain, entries] of Object.entries(rawObj || {})) {
+    if (!Array.isArray(entries) || !entries.length) continue;
+    if (domain.endsWith('.*')) wildcardList.push({ pattern: domain, entries });
+    else exactMap.set(domain, entries);
+  }
+}
+
 function buildCosmeticIndex(list) {
   const index = {
     global: Array.isArray(list.global) ? list.global : [],
@@ -246,16 +304,20 @@ function buildCosmeticIndex(list) {
     wildcardDomains: [],
     exactExceptions: new Map(),
     wildcardExceptions: [],
+    exactStyles: new Map(),
+    wildcardStyles: [],
+    exactProcedural: new Map(),
+    wildcardProcedural: [],
     generichideExact: new Set(),
     generichideWildcard: [],
     elemhideExact: new Set(),
     elemhideWildcard: []
   };
-  for (const [domain, entries] of Object.entries(list.domains || {})) {
-    if (!Array.isArray(entries) || !entries.length) continue;
-    if (domain.endsWith('.*')) index.wildcardDomains.push({ pattern: domain, entries });
-    else index.exactDomains.set(domain, entries);
-  }
+
+  indexDomainMap(list.domains, index.exactDomains, index.wildcardDomains);
+  indexDomainMap(list.styles, index.exactStyles, index.wildcardStyles);
+  indexDomainMap(list.procedural, index.exactProcedural, index.wildcardProcedural);
+
   for (const [domain, entries] of Object.entries(list.exceptions || {})) {
     if (!Array.isArray(entries) || !entries.length) continue;
     const set = new Set(entries);
@@ -305,6 +367,18 @@ function listMatchesHost(host, chain, exactSet, wildcardList) {
   return wildcardList.some((pattern) => hostMatches(host, pattern));
 }
 
+function collectMappedEntries(host, chain, exactMap, wildcardList) {
+  const out = [];
+  for (const domain of chain) {
+    const entries = exactMap.get(domain);
+    if (entries) out.push(...entries);
+  }
+  for (const item of wildcardList) {
+    if (hostMatches(host, item.pattern)) out.push(...item.entries);
+  }
+  return out;
+}
+
 async function selectorsForHost(hostname, customRulesText) {
   const host = String(hostname || '').toLowerCase().replace(/\.$/, '');
   const index = await loadCosmeticIndex();
@@ -312,10 +386,10 @@ async function selectorsForHost(hostname, customRulesText) {
   const custom = customRulesText ? compileUserRules(customRulesText).cosmetic : null;
 
   if (listMatchesHost(host, chain, index.elemhideExact, index.elemhideWildcard)) {
-    return [];
+    return { selectors: [], styles: [], procedural: [] };
   }
   if (custom?.elemhide?.some((pattern) => hostMatches(host, pattern))) {
-    return [];
+    return { selectors: [], styles: [], procedural: [] };
   }
 
   const generichide = listMatchesHost(host, chain, index.generichideExact, index.generichideWildcard) ||
@@ -335,32 +409,42 @@ async function selectorsForHost(hostname, customRulesText) {
     }
   }
 
-  const domainSelectors = [];
-  for (const domain of chain) {
-    const entries = index.exactDomains.get(domain);
-    if (entries) domainSelectors.push(...entries);
-  }
-  for (const item of index.wildcardDomains) {
-    if (hostMatches(host, item.pattern)) domainSelectors.push(...item.entries);
-  }
+  const domainSelectors = collectMappedEntries(host, chain, index.exactDomains, index.wildcardDomains);
   if (custom?.domains) {
     for (const [domain, entries] of Object.entries(custom.domains)) {
       if (hostMatches(host, domain)) domainSelectors.push(...entries);
     }
   }
 
-  const customGlobal = custom?.global || [];
-  if (!exceptions.size && !domainSelectors.length && !customGlobal.length) {
-    return generichide ? [] : index.global;
+  const styles = collectMappedEntries(host, chain, index.exactStyles, index.wildcardStyles);
+  if (custom?.styles) {
+    for (const [domain, entries] of Object.entries(custom.styles)) {
+      if (hostMatches(host, domain)) styles.push(...entries);
+    }
   }
 
-  const selectors = new Set();
-  if (!generichide) {
-    for (const selector of index.global) if (!exceptions.has(selector)) selectors.add(selector);
-    for (const selector of customGlobal) if (!exceptions.has(selector)) selectors.add(selector);
+  const procedural = collectMappedEntries(host, chain, index.exactProcedural, index.wildcardProcedural);
+  if (custom?.procedural) {
+    for (const [domain, entries] of Object.entries(custom.procedural)) {
+      if (hostMatches(host, domain)) procedural.push(...entries);
+    }
   }
-  for (const selector of domainSelectors) if (!exceptions.has(selector)) selectors.add(selector);
-  return [...selectors];
+
+  const customGlobal = custom?.global || [];
+  let selectors;
+  if (!exceptions.size && !domainSelectors.length && !customGlobal.length) {
+    selectors = generichide ? [] : index.global;
+  } else {
+    const set = new Set();
+    if (!generichide) {
+      for (const selector of index.global) if (!exceptions.has(selector)) set.add(selector);
+      for (const selector of customGlobal) if (!exceptions.has(selector)) set.add(selector);
+    }
+    for (const selector of domainSelectors) if (!exceptions.has(selector)) set.add(selector);
+    selectors = [...set];
+  }
+
+  return { selectors, styles, procedural };
 }
 
 async function fetchJsonWithFallback(relativePath, optional = false) {
@@ -404,24 +488,19 @@ function ruleSignature(rule) {
 
 async function updateFilters() {
   const declared = declaredRulesets();
-  const [cosmetics, remoteAds, remoteDomains, remoteDomains2, remoteDomains3] = await Promise.all([
-    fetchJsonWithFallback('cosmetic.json', false),
-    fetchJsonWithFallback('rulesets/ads.json', false),
-    fetchJsonWithFallback('rulesets/domains.json', false),
-    fetchJsonWithFallback('rulesets/domains_2.json', true),
-    fetchJsonWithFallback('rulesets/domains_3.json', true)
-  ]);
+  const cosmeticsPromise = fetchJsonWithFallback('cosmetic.json', false);
+  const rulesetPromises = declared.map(async (id) => {
+    const optional = id !== 'ads' && id !== 'domains';
+    const data = await fetchJsonWithFallback(`rulesets/${id}.json`, optional);
+    return [id, Array.isArray(data) ? data : null];
+  });
 
-  if (!cosmetics || !Array.isArray(cosmetics.global) || !Array.isArray(remoteAds) || !Array.isArray(remoteDomains)) {
+  const [cosmetics, ...rulesetEntries] = await Promise.all([cosmeticsPromise, ...rulesetPromises]);
+  const remoteByRuleset = Object.fromEntries(rulesetEntries);
+
+  if (!cosmetics || !Array.isArray(cosmetics.global) || !Array.isArray(remoteByRuleset.ads) || !Array.isArray(remoteByRuleset.domains)) {
     throw new Error('Invalid filter update');
   }
-
-  const remoteByRuleset = {
-    ads: remoteAds,
-    domains: remoteDomains,
-    domains_2: Array.isArray(remoteDomains2) ? remoteDomains2 : null,
-    domains_3: Array.isArray(remoteDomains3) ? remoteDomains3 : null
-  };
 
   const bundledByRuleset = {};
   await Promise.all(declared.map(async (id) => {
@@ -442,13 +521,13 @@ async function updateFilters() {
   for (const rules of Object.values(remoteByRuleset)) {
     if (!Array.isArray(rules)) continue;
     for (const rule of rules) {
-      if (!rule?.condition || !['block', 'allow'].includes(rule.action?.type)) continue;
+      if (!rule?.condition || !['block', 'allow', 'redirect', 'modifyHeaders'].includes(rule.action?.type)) continue;
       const sig = ruleSignature(rule);
       remoteSignatures.add(sig);
       if (bundledSignatures.has(sig) || seenNovel.has(sig)) continue;
       seenNovel.add(sig);
       if (rule.action.type === 'allow') novelAllow.push(rule);
-      else if (rule.condition.urlFilter || rule.condition.domainType || rule.condition.resourceTypes || rule.condition.initiatorDomains) {
+      else if (rule.condition.urlFilter || rule.condition.regexFilter || rule.condition.domainType || rule.condition.resourceTypes || rule.condition.initiatorDomains) {
         novelUrlOrConditional.push(rule);
       } else {
         novelDomain.push(rule);
@@ -556,8 +635,12 @@ async function getStatus() {
     totalActiveRules: activeStaticRules + dynamicRules.length,
     cosmeticGlobalCount: cosmetic.global.length,
     cosmeticDomainCount: cosmetic.exactDomains.size + cosmetic.wildcardDomains.length,
+    cosmeticProceduralCount: cosmetic.exactProcedural.size + cosmetic.wildcardProcedural.length,
     customNetworkCount: compiled.networkRules.length,
-    customCosmeticCount: compiled.cosmetic.global.length + Object.values(compiled.cosmetic.domains).reduce((a, b) => a + b.length, 0),
+    customCosmeticCount: compiled.cosmetic.global.length
+      + Object.values(compiled.cosmetic.domains).reduce((a, b) => a + b.length, 0)
+      + Object.values(compiled.cosmetic.styles || {}).reduce((a, b) => a + b.length, 0)
+      + Object.values(compiled.cosmetic.procedural || {}).reduce((a, b) => a + b.length, 0),
     customInvalidCount: compiled.invalidLines.length,
     customRulesError: localData.customRulesError || '',
     lastUpdate: localData.lastUpdate || 0,
@@ -565,7 +648,25 @@ async function getStatus() {
   };
 }
 
+function isPauseOrAllowMatchedRule(info) {
+  const id = info?.rule?.ruleId;
+  if (info?.rule?.rulesetId !== '_dynamic') return false;
+  return id === GLOBAL_OFF_ID || (id >= PAUSE_START && id < ALLOW_START + 1000);
+}
+
 async function getTabStats(tabId) {
+  const value = await settings();
+  if (!value.enabled) return { blockedCount: 0 };
+  if (tabId && api.tabs?.get) {
+    try {
+      const tab = await api.tabs.get(tabId);
+      const host = hostFromSender(null, { url: tab?.url });
+      if (host && (isListed(host, value.pausedSites) || isListed(host, value.allowlist))) {
+        return { blockedCount: 0 };
+      }
+    } catch {}
+  }
+
   let badgeCount = 0;
   if (tabId) {
     try {
@@ -575,7 +676,7 @@ async function getTabStats(tabId) {
     if (api.declarativeNetRequest.getMatchedRules) {
       try {
         const matched = await api.declarativeNetRequest.getMatchedRules({ tabId });
-        const count = matched?.rulesMatchedInfo?.length || 0;
+        const count = (matched?.rulesMatchedInfo || []).filter((info) => !isPauseOrAllowMatchedRule(info)).length;
         return { blockedCount: Math.max(badgeCount, count) };
       } catch {}
     }
@@ -624,10 +725,10 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const value = await settings();
       const host = hostFromSender(message, sender);
       if (!value.enabled || isListed(host, value.pausedSites) || isListed(host, value.allowlist)) {
-        return { selectors: [], active: false };
+        return { selectors: [], styles: [], procedural: [], active: false };
       }
-      const selectors = await selectorsForHost(host, value.customRules);
-      return { selectors, active: true };
+      const res = await selectorsForHost(host, value.customRules);
+      return { ...res, active: true };
     }
     if (message?.type === 'UPDATE_FILTERS') {
       const result = await updateFilters();

@@ -5,12 +5,15 @@ import {
   normalizeDomainEntry,
   parseCosmeticControlFilter,
   parseCosmeticFilter,
+  parseExtendedCosmeticFilter,
   parseNetworkFilter
 } from './filter-parser.js';
 
 const CUSTOM_PRIORITIES = {
   blockPriority: 10,
   importantBlockPriority: 450,
+  redirectPriority: 55,
+  importantRedirectPriority: 475,
   allowPriority: 300,
   importantAllowPriority: 500
 };
@@ -34,12 +37,13 @@ export function compileUserRules(text, { startId = 100000, networkLimit = 1000 }
       cosmeticLines.push(line);
       continue;
     }
-    if (line.includes('##') || line.includes('#@#')) {
-      if (parseCosmeticFilter(line)) cosmeticLines.push(line);
+    if (line.includes('##') || line.includes('#@#') || line.includes('#?#') || line.includes('#@?#')) {
+      if (parseCosmeticFilter(line) || parseExtendedCosmeticFilter(line)) cosmeticLines.push(line);
       else invalidLines.push(line);
       continue;
     }
-    if (parseNetworkFilter(line, CUSTOM_PRIORITIES)) {
+    const parsedNet = parseNetworkFilter(line, CUSTOM_PRIORITIES);
+    if (parsedNet && !parsedNet.badfilter) {
       networkLines.push(line);
     } else {
       invalidLines.push(line);

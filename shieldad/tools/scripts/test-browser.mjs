@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,14 +33,26 @@ const AD_HOSTS = [
   'openx.net'
 ];
 
-function startFixtureServer() {
+async function startFixtureServer() {
   const hits = new Map();
   const record = (host, pathname) => {
     const key = `${host}${pathname}`;
     hits.set(key, (hits.get(key) || 0) + 1);
   };
 
-  const server = http.createServer((req, res) => {
+  const tlsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'shieldad-tls-'));
+  const keyPath = path.join(tlsDir, 'key.pem');
+  const certPath = path.join(tlsDir, 'cert.pem');
+  execFileSync('openssl', [
+    'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+    '-keyout', keyPath, '-out', certPath, '-days', '1',
+    '-subj', '/CN=www.youtube.com',
+    '-addext', 'subjectAltName=DNS:www.youtube.com,DNS:*.youtube.com,DNS:localhost'
+  ], { stdio: 'ignore' });
+  const [key, cert] = await Promise.all([fs.readFile(keyPath), fs.readFile(certPath)]);
+
+  let httpServer;
+  const handler = (req, res) => {
     const host = (req.headers.host || '127.0.0.1').split(':')[0].toLowerCase();
     const url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
     record(host, url.pathname);
@@ -56,7 +70,7 @@ function startFixtureServer() {
     }
 
     if (url.pathname === '/frame.html') {
-      const port = server.address().port;
+      const port = httpServer.address().port;
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(`<!doctype html><html><body>
         <script src="http://taboola.com:${port}/iframe-ad.js"></script>
@@ -65,7 +79,30 @@ function startFixtureServer() {
       return;
     }
 
-    const port = server.address().port;
+    if (url.pathname === '/youtube.html') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(`<!doctype html><html><head><title>YouTube Fixture</title></head><body>
+        <div id="masthead-ad">Masthead Banner</div>
+        <div id="player-ads">
+          <div id="player-safe-shell">Player Shell</div>
+          <ytd-ad-slot-renderer id="yt-player-ad">Sidebar Ad Slot</ytd-ad-slot-renderer>
+          <ytd-companion-slot-renderer id="yt-companion-ad">Companion Ad</ytd-companion-slot-renderer>
+        </div>
+        <div class="ytp-ad-player-overlay-layout" id="yt-skip-overlay">
+          <button class="ytp-skip-ad-button">Skip</button>
+        </div>
+        <div class="ytp-ad-overlay-container" id="yt-overlay-banner">Overlay Banner Ad</div>
+        <ytd-rich-item-renderer id="yt-feed-ad-card">
+          <div id="content"><ytd-ad-slot-renderer>Sponsored Feed Ad</ytd-ad-slot-renderer></div>
+        </ytd-rich-item-renderer>
+        <ytd-rich-item-renderer id="yt-feed-organic">
+          <div id="content"><span id="organic-title">Real Video Title</span></div>
+        </ytd-rich-item-renderer>
+      </body></html>`);
+      return;
+    }
+
+    const port = httpServer.address().port;
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(`<!doctype html><html><head><title>ShieldAd Fixture</title></head><body>
       <div id="cosmetic-global" class="ADBox" style="display:block !important">Global Ad</div>
@@ -76,6 +113,8 @@ function startFixtureServer() {
       <div id="cosmetic-domain" class="ad">Domain Specific Ad</div>
       <div id="cosmetic-ap-specific" class="w-pencil-banner">AndroidPolice Specific</div>
       <div id="cosmetic-custom" class="custom-hidden-slot">Custom Hidden Slot</div>
+      <article id="cosmetic-procedural"><span>Sponsored Partner Post</span></article>
+      <div id="cosmetic-styled" style="border: 5px solid red">Styled Element</div>
       <div id="safe-content" class="article-body">Real Article Content</div>
       <img id="safe-img" src="/safe.png" width="16" height="16" alt="ok">
       <script src="/safe.js"></script>
@@ -86,6 +125,7 @@ function startFixtureServer() {
       <script src="http://outbrain.com:${port}/widget.js"></script>
       <script src="http://openx.net:${port}/ad.js"></script>
       <script src="http://custom-blocked.test:${port}/custom.js"></script>
+      <script src="http://custom-redirected.test:${port}/tag.js"></script>
       <iframe id="third-party-frame" src="http://iframe-host.test:${port}/frame.html"></iframe>
       <script>
         setTimeout(() => {
@@ -97,18 +137,29 @@ function startFixtureServer() {
         }, 120);
       </script>
     </body></html>`);
-  });
+  };
 
-  return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolve({
-        port: server.address().port,
-        hits,
-        resetHits: () => hits.clear(),
-        close: () => new Promise((r) => server.close(r))
-      });
-    });
-  });
+  httpServer = http.createServer(handler);
+  const httpsServer = https.createServer({ key, cert }, handler);
+
+  await Promise.all([
+    new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve)),
+    new Promise((resolve) => httpsServer.listen(0, '127.0.0.1', resolve))
+  ]);
+
+  return {
+    port: httpServer.address().port,
+    httpsPort: httpsServer.address().port,
+    hits,
+    resetHits: () => hits.clear(),
+    close: async () => {
+      await Promise.all([
+        new Promise((r) => httpServer.close(r)),
+        new Promise((r) => httpsServer.close(r))
+      ]);
+      await fs.rm(tlsDir, { recursive: true, force: true });
+    }
+  };
 }
 
 async function waitForShieldAdWorker(browser) {
@@ -131,13 +182,17 @@ async function waitForShieldAdWorker(browser) {
 async function main() {
   const server = await startFixtureServer();
   const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'shieldad-chrome-'));
+  const builtManifest = JSON.parse(await fs.readFile(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
+  const declaredRulesets = builtManifest.declarative_net_request.rule_resources.map((r) => r.id);
   const mappedHosts = [
     ...AD_HOSTS,
     'news.shieldad.test',
     'iframe-host.test',
     'custom-blocked.test',
+    'custom-redirected.test',
     'www.tripadvisor.co.uk',
-    'androidpolice.com'
+    'androidpolice.com',
+    'www.youtube.com'
   ];
   const hostResolverRules = mappedHosts.map((h) => `MAP ${h} 127.0.0.1`).join(',');
 
@@ -145,32 +200,41 @@ async function main() {
   try {
     browser = await puppeteer.launch({
       executablePath: CHROME_BIN,
-      headless: false,
+      headless: 'new',
+      pipe: true,
+      enableExtensions: true,
       userDataDir,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
-        `--disable-extensions-except=${EXT_DIR}`,
-        `--load-extension=${EXT_DIR}`,
+        '--ignore-certificate-errors',
+        '--enable-unsafe-extension-debugging',
         `--host-resolver-rules=${hostResolverRules}`
       ]
     });
+    const installedId = await browser.installExtension(EXT_DIR);
+    console.log('[test-browser] Installed unpacked extension via CDP:', installedId);
 
     const { worker, extensionId } = await waitForShieldAdWorker(browser);
     console.log('ShieldAd worker ready:', extensionId);
 
     // Wait briefly for onInstalled reconciliation to complete.
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 600));
 
     const enabledRulesets = await worker.evaluate(() => chrome.declarativeNetRequest.getEnabledRulesets());
     console.log('Enabled static rulesets:', enabledRulesets);
     assert.deepEqual(
       new Set(enabledRulesets),
-      new Set(['ads', 'domains', 'domains_2', 'domains_3']),
-      'All 4 static rulesets should be active in Chrome'
+      new Set(declaredRulesets),
+      `All ${declaredRulesets.length} static rulesets should be active in Chrome without rejection`
     );
+
+    const registeredScripts = await worker.evaluate(() => chrome.scripting.getRegisteredContentScripts());
+    assert.equal(registeredScripts.length, 1, 'MAIN-world scriptlets runner should be registered');
+    assert.equal(registeredScripts[0].world, 'MAIN');
+    assert.ok(registeredScripts[0].excludeMatches.includes('*://*.youtube.com/*'), 'YouTube must be excluded from scriptlets');
 
     const page = await browser.newPage();
     const pageErrors = [];
@@ -220,7 +284,29 @@ async function main() {
     assert.notEqual(apState.genericAd, 'none', '$generichide must prevent generic .ADBox hiding on androidpolice.com');
     assert.equal(apState.specificAd, 'none', 'Domain-specific rule must still hide .w-pencil-banner on androidpolice.com');
 
-    // 4. Verify Global OFF restores ads & cosmetics, and Global ON restores blocking
+    // 4. Verify YouTube ad-slot cosmetic hiding while preserving #player-ads shell & Skip overlay (HTTPS for HSTS preload)
+    await page.goto(`https://www.youtube.com:${server.httpsPort}/youtube.html`, { waitUntil: 'networkidle0' });
+    await new Promise((r) => setTimeout(r, 250));
+    const ytState = await page.evaluate(() => ({
+      masthead: getComputedStyle(document.getElementById('masthead-ad')).display,
+      playerAdsWrapper: getComputedStyle(document.getElementById('player-ads')).display,
+      playerAdSlot: getComputedStyle(document.getElementById('yt-player-ad')).display,
+      companionAd: getComputedStyle(document.getElementById('yt-companion-ad')).display,
+      skipOverlay: getComputedStyle(document.getElementById('yt-skip-overlay')).display,
+      overlayBanner: getComputedStyle(document.getElementById('yt-overlay-banner')).display,
+      feedAdCard: getComputedStyle(document.getElementById('yt-feed-ad-card')).display,
+      organicCard: getComputedStyle(document.getElementById('yt-feed-organic')).display
+    }));
+    assert.equal(ytState.masthead, 'none', 'YouTube #masthead-ad must be hidden');
+    assert.notEqual(ytState.playerAdsWrapper, 'none', 'YouTube #player-ads shell must stay visible');
+    assert.equal(ytState.playerAdSlot, 'none', 'YouTube ytd-ad-slot-renderer must be hidden');
+    assert.equal(ytState.companionAd, 'none', 'YouTube ytd-companion-slot-renderer must be hidden');
+    assert.notEqual(ytState.skipOverlay, 'none', 'YouTube Skip Ad overlay wrapper must stay visible');
+    assert.equal(ytState.overlayBanner, 'none', 'YouTube overlay banner ad must be hidden');
+    assert.equal(ytState.feedAdCard, 'none', 'YouTube rich item containing ad-slot must be hidden');
+    assert.notEqual(ytState.organicCard, 'none', 'YouTube organic video card must stay visible');
+
+    // 5. Verify Global OFF restores ads & cosmetics, and Global ON restores blocking
     await worker.evaluate(async () => {
       await chrome.storage.sync.set({ enabled: false });
     });
@@ -251,7 +337,7 @@ async function main() {
     const onCosmetic = await page.evaluate(() => getComputedStyle(document.getElementById('cosmetic-global')).display);
     assert.equal(onCosmetic, 'none', 'Cosmetic hiding must recover after re-enabling');
 
-    // 5. Verify Per-Site Pause uses allowAllRequests so nested third-party iframe ads are also allowed
+    // 6. Verify Per-Site Pause uses allowAllRequests so nested third-party iframe ads are also allowed
     await worker.evaluate(async () => {
       await chrome.storage.sync.set({ pausedSites: ['news.shieldad.test'] });
     });
@@ -268,7 +354,7 @@ async function main() {
     });
     await new Promise((r) => setTimeout(r, 400));
 
-    // 6. Verify Popup & Options UI and live custom network + cosmetic rule saving
+    // 7. Verify Popup & Options UI and live custom block, redirect, procedural, & :style() rules
     const popupPage = await browser.newPage();
     popupPage.on('pageerror', (err) => pageErrors.push(`popup: ${err.message}`));
     await popupPage.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle0' });
@@ -282,10 +368,16 @@ async function main() {
     await optionsPage.waitForFunction(() => document.getElementById('statNetwork').textContent !== '—');
     const ruleText = await optionsPage.$eval('#statNetwork', (el) => el.textContent);
     console.log('Options statNetwork:', ruleText);
-    assert.ok(Number(ruleText.replace(/,/g, '')) > 90000, `Expected >90,000 active rules in Options, saw ${ruleText}`);
+    assert.ok(Number(ruleText.replace(/,/g, '')) > 100000, `Expected >100,000 active rules in Options, saw ${ruleText}`);
 
     await optionsPage.$eval('#customRules', (el) => {
-      el.value = '||custom-blocked.test^\nnews.shieldad.test##.custom-hidden-slot';
+      el.value = [
+        '||custom-blocked.test^',
+        '||custom-redirected.test^*/tag.js$script,redirect=noop.js',
+        'news.shieldad.test##.custom-hidden-slot',
+        'news.shieldad.test#?#article:has-text(Sponsored Partner)',
+        'news.shieldad.test##div#cosmetic-styled:style(opacity: 0.5 !important)'
+      ].join('\n');
     });
     await optionsPage.click('#save');
     await optionsPage.waitForFunction(() => document.getElementById('saved').textContent.includes('Saved'));
@@ -295,8 +387,16 @@ async function main() {
     await page.goto(`http://news.shieldad.test:${server.port}/page.html`, { waitUntil: 'networkidle0' });
     await new Promise((r) => setTimeout(r, 250));
     assert.equal(server.hits.get('custom-blocked.test/custom.js') || 0, 0, 'Custom network rule should block custom-blocked.test');
-    const customCosmetic = await page.evaluate(() => getComputedStyle(document.getElementById('cosmetic-custom')).display);
-    assert.equal(customCosmetic, 'none', 'Custom cosmetic rule should hide .custom-hidden-slot');
+    assert.equal(server.hits.get('custom-redirected.test/tag.js') || 0, 0, 'Custom $redirect=noop.js should intercept tag.js locally');
+
+    const customStates = await page.evaluate(() => ({
+      hiddenSlot: getComputedStyle(document.getElementById('cosmetic-custom')).display,
+      proceduralCard: getComputedStyle(document.getElementById('cosmetic-procedural')).display,
+      styledOpacity: getComputedStyle(document.getElementById('cosmetic-styled')).opacity
+    }));
+    assert.equal(customStates.hiddenSlot, 'none', 'Custom cosmetic rule should hide .custom-hidden-slot');
+    assert.equal(customStates.proceduralCard, 'none', 'Custom procedural :has-text rule should hide Sponsored Partner card');
+    assert.equal(customStates.styledOpacity, '0.5', 'Custom :style rule should update opacity');
 
     assert.equal(pageErrors.length, 0, `Unexpected page errors: ${pageErrors.join(' | ')}`);
     console.log('ALL REAL CHROME EXTENSION CHECKS PASSED');
@@ -309,5 +409,6 @@ async function main() {
 
 main().catch((error) => {
   console.error(error);
+  console.error('FATAL:', String(error?.message || error).replace(/\s+/g, ' '));
   process.exit(1);
 });

@@ -34,7 +34,7 @@
         <span>Up to 1,000 network rules</span>
       </div>
       <textarea id="customRules" spellcheck="false" placeholder="||ads.example.com^&#10;*/tracking/pixel/*$image&#10;@@||needed.example.com^&#10;example.com##.sponsored-box&#10;##.annoying-banner"></textarea>
-      <p class="hint">Supports <code>||domain^</code>, URL wildcards, <code>@@</code> exceptions, <code>$third-party</code>, <code>$important</code>, <code>$script</code>, <code>$image</code>, <code>$xmlhttprequest</code>, and <code>##selector</code> / <code>#@#selector</code> cosmetic rules.</p>
+      <p class="hint">Supports <code>||domain^</code>, URL wildcards, <code>@@</code> exceptions, <code>$third-party</code>, <code>$important</code>, <code>$redirect=</code>, <code>$removeparam=</code>, <code>$script</code>, <code>$image</code>, <code>$xhr</code>, and <code>##</code> / <code>#@#</code> / <code>#?#</code> (<code>:has-text()</code>, <code>:style()</code>) cosmetic rules.</p>
       <p id="customStats" class="hint status-hint"></p>
     </section>
 
