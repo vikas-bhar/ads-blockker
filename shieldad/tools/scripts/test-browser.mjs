@@ -179,7 +179,6 @@ async function main() {
         executablePath: CHROME_BIN,
         headless: false,
         enableExtensions: true,
-        dumpio: true,
         timeout: 45000,
         userDataDir,
         args: [
@@ -193,22 +192,70 @@ async function main() {
         ]
       });
     } catch (launchErr) {
-      // Check whether Chrome launches cleanly WITHOUT the extension so we know immediately if the extension or Chrome/Xvfb failed.
-      let bareOk = 'no';
-      try {
-        const bare = await puppeteer.launch({
-          executablePath: CHROME_BIN,
-          headless: false,
-          dumpio: true,
-          timeout: 15000,
-          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-        });
-        bareOk = 'yes';
-        await bare.close();
-      } catch (bareErr) {
-        bareOk = `err:${bareErr.message}`;
-      }
-      throw new Error(`Extension Chrome launch failed (${launchErr.message}); bare Chrome launch=${bareOk}`);
+      const bareOk = await (async () => {
+        try {
+          const bare = await puppeteer.launch({
+            executablePath: CHROME_BIN,
+            headless: false,
+            timeout: 12000,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+          });
+          await bare.close();
+          return 'yes';
+        } catch (e) { return `err:${e.message.slice(0, 60)}`; }
+      })();
+
+      // Binary probe: extension without DNR vs extension without regexFilter rules vs Chrome --v=1 stderr
+      const probe = async (label, mutateManifest, mutateAds) => {
+        const tmpExt = await fs.mkdtemp(path.join(os.tmpdir(), `probe-${label}-`));
+        try {
+          await fs.cp(EXT_DIR, tmpExt, { recursive: true });
+          const mPath = path.join(tmpExt, 'manifest.json');
+          const m = JSON.parse(await fs.readFile(mPath, 'utf8'));
+          if (mutateManifest) mutateManifest(m);
+          await fs.writeFile(mPath, JSON.stringify(m));
+          if (mutateAds) {
+            const aPath = path.join(tmpExt, 'rulesets/ads.json');
+            const rules = JSON.parse(await fs.readFile(aPath, 'utf8'));
+            await fs.writeFile(aPath, JSON.stringify(mutateAds(rules)));
+          }
+          const b = await puppeteer.launch({
+            executablePath: CHROME_BIN,
+            headless: false,
+            enableExtensions: true,
+            timeout: 15000,
+            args: [
+              '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
+              `--disable-extensions-except=${tmpExt}`, `--load-extension=${tmpExt}`
+            ]
+          });
+          await b.close();
+          return `${label}=ok`;
+        } catch (e) {
+          return `${label}=fail(${e.message.slice(0, 40)})`;
+        } finally {
+          await fs.rm(tmpExt, { recursive: true, force: true });
+        }
+      };
+
+      const { spawnSync } = await import('node:child_process');
+      const tmpProf = await fs.mkdtemp(path.join(os.tmpdir(), 'prof-diag-'));
+      const logRes = spawnSync(CHROME_BIN, [
+        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
+        '--enable-logging=stderr', '--v=1', '--remote-debugging-port=0',
+        `--user-data-dir=${tmpProf}`,
+        `--disable-extensions-except=${EXT_DIR}`, `--load-extension=${EXT_DIR}`
+      ], { timeout: 10000, encoding: 'utf8' });
+      await fs.rm(tmpProf, { recursive: true, force: true });
+      const errTail = (logRes.stderr || '').split(/\r?\n/).filter((l) => !l.includes('dbus/bus.cc')).slice(-8).join(' | ');
+
+      const [rNoDnr, rNoRegex, rOnlyAds] = await Promise.all([
+        probe('noDnr', (m) => { delete m.declarative_net_request; }),
+        probe('noRegex', null, (rules) => rules.filter((r) => !r.condition?.regexFilter)),
+        probe('onlyAds', (m) => { m.declarative_net_request.rule_resources = m.declarative_net_request.rule_resources.slice(0, 1); })
+      ]);
+
+      throw new Error(`Launch fail (${launchErr.message}); bare=${bareOk}; ${rNoDnr}; ${rNoRegex}; ${rOnlyAds}; stderr=[${errTail}]`);
     }
     console.log('[test-browser] Chrome launched.');
 
