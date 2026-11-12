@@ -188,72 +188,10 @@ async function main() {
         `--host-resolver-rules=${hostResolverRules}`
       ]
     });
-    let installedId;
-    try {
-      installedId = await browser.installExtension(EXT_DIR);
-      console.log('[test-browser] Installed unpacked extension via CDP:', installedId);
-    } catch (installErr) {
-      let extra = '';
-      try {
-        const b3 = await puppeteer.launch({
-          executablePath: CHROME_BIN,
-          headless: 'new',
-          enableExtensions: true,
-          timeout: 15000,
-          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--enable-unsafe-extension-debugging', `--disable-extensions-except=${EXT_DIR}`, `--load-extension=${EXT_DIR}`]
-        });
-        await new Promise((r) => setTimeout(r, 1500));
-        extra = `; loadExtTargets=[${b3.targets().map((t) => `${t.type()}:${t.url()}`).join(',')}]`;
-        const p3 = await b3.newPage();
-        await p3.goto('chrome://extensions', { waitUntil: 'domcontentloaded' });
-        const extText = await p3.evaluate(() => document.body?.innerText?.slice(0, 300) || '');
-        extra += `; chromeExt=${JSON.stringify(extText)}`;
-        await b3.close();
-      } catch (e3) {
-        extra = `; loadExtErr=${e3.message}`;
-      }
-      throw new Error(`installExtension failed: ${installErr.message}${extra}`);
-    }
+    const installedId = await browser.installExtension(EXT_DIR);
+    console.log('[test-browser] Installed unpacked extension via CDP:', installedId);
 
-    let worker, extensionId;
-    try {
-      ({ worker, extensionId } = await waitForShieldAdWorker(browser));
-    } catch (swErr) {
-      const tList = browser.targets().map((t) => `${t.type()}:${t.url()}`);
-      // Also probe headless:false + pipe:true + installExtension and headless:new + --load-extension
-      let probeMsg = `cdpTargets=[${tList.join(', ')}]`;
-      try {
-        const b2 = await puppeteer.launch({
-          executablePath: CHROME_BIN,
-          headless: false,
-          pipe: true,
-          enableExtensions: true,
-          timeout: 15000,
-          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--enable-unsafe-extension-debugging']
-        });
-        const id2 = await b2.installExtension(EXT_DIR);
-        await new Promise((r) => setTimeout(r, 2000));
-        probeMsg += `; headfulPipe=ok(id=${id2},targets=[${b2.targets().map((t) => t.type() + ':' + t.url()).join(',')}])`;
-        await b2.close();
-      } catch (e2) {
-        probeMsg += `; headfulPipe=err(${e2.message})`;
-      }
-      try {
-        const b3 = await puppeteer.launch({
-          executablePath: CHROME_BIN,
-          headless: 'new',
-          enableExtensions: true,
-          timeout: 15000,
-          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', `--disable-extensions-except=${EXT_DIR}`, `--load-extension=${EXT_DIR}`]
-        });
-        await new Promise((r) => setTimeout(r, 2000));
-        probeMsg += `; headlessLoadExt=ok(targets=[${b3.targets().map((t) => t.type() + ':' + t.url()).join(',')}])`;
-        await b3.close();
-      } catch (e3) {
-        probeMsg += `; headlessLoadExt=err(${e3.message})`;
-      }
-      throw new Error(`${swErr.message}; ${probeMsg}`);
-    }
+    const { worker, extensionId } = await waitForShieldAdWorker(browser);
     console.log('ShieldAd worker ready:', extensionId);
 
     // Wait briefly for onInstalled reconciliation to complete.

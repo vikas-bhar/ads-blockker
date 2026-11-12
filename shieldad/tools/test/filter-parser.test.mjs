@@ -133,6 +133,9 @@ describe('network filter parser', () => {
       'example.com##.ad',
       'example.com#@?#div:has-text(Ad)',
       'example.com#$#.ad { display: none; }',
+      '||*ontent.steamplay.*^',
+      '|*ad.example^',
+      'ad.example*|',
       '||a.com^$redirect-rule=noop.js',
       '||a.com^$popup',
       '||a.com^$unknownmod',
@@ -148,6 +151,12 @@ describe('network filter parser', () => {
       priority: 1,
       action: { type: 'block' },
       condition: { urlFilter: '127.0.0.1 ads.example.com' }
+    })).toBe(false);
+    expect(isValidDnrRule({
+      id: 2,
+      priority: 1,
+      action: { type: 'block' },
+      condition: { urlFilter: '||*ad.example^' }
     })).toBe(false);
     expect(isSafeRe2Pattern('ads\\/[0-9]+')).toBe(true);
     expect(isSafeRe2Pattern('(?=ad)')).toBe(false);
