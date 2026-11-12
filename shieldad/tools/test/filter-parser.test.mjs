@@ -124,10 +124,15 @@ describe('network filter parser', () => {
     expect(bf.badfilter).toBe(true);
   });
 
-  it('rejects comments, cosmetics, unsupported modifiers, and unsafe RE2 regexes', () => {
+  it('rejects comments, cosmetics, hosts lines, spaces, unsupported modifiers, and unsafe RE2 regexes', () => {
     for (const filter of [
       '! comment',
+      '# hosts comment',
+      '#',
+      '127.0.0.1 ads.example.com',
       'example.com##.ad',
+      'example.com#@?#div:has-text(Ad)',
+      'example.com#$#.ad { display: none; }',
       '||a.com^$redirect-rule=noop.js',
       '||a.com^$popup',
       '||a.com^$unknownmod',
@@ -138,6 +143,12 @@ describe('network filter parser', () => {
     ]) {
       expect(parseNetworkFilter(filter)).toBeNull();
     }
+    expect(isValidDnrRule({
+      id: 1,
+      priority: 1,
+      action: { type: 'block' },
+      condition: { urlFilter: '127.0.0.1 ads.example.com' }
+    })).toBe(false);
     expect(isSafeRe2Pattern('ads\\/[0-9]+')).toBe(true);
     expect(isSafeRe2Pattern('(?=ad)')).toBe(false);
     expect(isSafeRe2Pattern('[a-z0-9]{25}')).toBe(false);

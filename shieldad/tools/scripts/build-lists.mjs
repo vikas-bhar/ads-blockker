@@ -59,8 +59,9 @@ const UASSETS_SOURCES = [
   'uassets-filters', 'uassets-2020', 'uassets-2021', 'uassets-2022', 'uassets-2023',
   'uassets-2024', 'uassets-2025', 'uassets-2026', 'uassets-general', 'uassets-mobile',
   'uassets-privacy', 'uassets-removeparam', 'uassets-badware', 'uassets-resource-abuse',
-  'uassets-quick-fixes', 'uassets-unbreak', 'uassets-ubol', 'pgl-serverlist'
+  'uassets-quick-fixes', 'uassets-unbreak', 'uassets-ubol'
 ];
+const HOSTS_SOURCES = ['hosts', 'pgl-serverlist'];
 
 const PRIORITY_NETWORK_SOURCES = [
   'easylist', 'easylist-dimensions', 'easylist-specific', 'easylist-thirdparty',
@@ -132,9 +133,11 @@ const uAssetsLines = linesFor(UASSETS_SOURCES);
 const cosmeticLines = [...networkLines, ...linesFor(COSMETIC_SOURCES)];
 
 const hostsDomains = [];
-for (const line of downloaded.hosts.split(/\r?\n/)) {
-  const parsed = parseHostsLine(line);
-  if (parsed) hostsDomains.push(parsed);
+for (const sourceName of HOSTS_SOURCES) {
+  for (const line of downloaded[sourceName].split(/\r?\n/)) {
+    const parsed = parseHostsLine(line);
+    if (parsed) hostsDomains.push(parsed);
+  }
 }
 
 const { ads: rules, domainChunks, stats } = compileStaticRulesets({

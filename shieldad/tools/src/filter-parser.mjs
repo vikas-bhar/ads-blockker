@@ -306,12 +306,18 @@ export function parseNetworkFilter(input, priorities = {}) {
   if (
     !original ||
     original.startsWith('!') ||
+    original.startsWith('#') ||
     original.startsWith('[') ||
     original.includes('##') ||
     original.includes('#@#') ||
     original.includes('#?#') ||
+    original.includes('#@?#') ||
+    original.includes('#$#') ||
+    original.includes('#@$#') ||
     original.includes('#%#') ||
-    original.includes('$$')
+    original.includes('#@%#') ||
+    original.includes('$$') ||
+    original.includes('$@$')
   ) {
     return null;
   }
@@ -448,8 +454,8 @@ export function parseNetworkFilter(input, priorities = {}) {
       );
       if (!hasScopedWildcard) return null;
     } else {
-      if (filter.includes('##') || filter.includes('#@#') || /[\r\n\0]/.test(filter)) return null;
-      if (filter === '||' || filter === '|') return null;
+      if (filter.includes('##') || filter.includes('#@#') || filter.includes('#?#') || filter.includes('#@?#') || /\s/.test(filter) || /[\r\n\0]/.test(filter)) return null;
+      if (filter === '||' || filter === '|' || filter.startsWith('#')) return null;
       condition.urlFilter = filter;
     }
   }
@@ -931,7 +937,7 @@ export function isValidDnrRule(rule) {
   const cond = rule.condition;
   if (!cond || typeof cond !== 'object') return false;
   if (cond.urlFilter !== undefined) {
-    if (typeof cond.urlFilter !== 'string' || !cond.urlFilter.length || /[^\x20-\x7e]/.test(cond.urlFilter)) return false;
+    if (typeof cond.urlFilter !== 'string' || !cond.urlFilter.length || /[^\x21-\x7e]/.test(cond.urlFilter)) return false;
   }
   if (cond.regexFilter !== undefined) {
     if (!isSafeRe2Pattern(cond.regexFilter)) return false;
