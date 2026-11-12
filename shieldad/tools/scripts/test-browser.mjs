@@ -192,62 +192,57 @@ async function main() {
         ]
       });
     } catch (launchErr) {
-      const bareOk = await (async () => {
-        try {
-          const bare = await puppeteer.launch({
-            executablePath: CHROME_BIN,
-            headless: false,
-            timeout: 12000,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-          });
-          await bare.close();
-          return 'yes';
-        } catch (e) { return `err:${e.message.slice(0, 60)}`; }
-      })();
+      const tmpExt = await fs.mkdtemp(path.join(os.tmpdir(), 'probe-bs-'));
+      try {
+        await fs.cp(EXT_DIR, tmpExt, { recursive: true });
+        const fullDomains = JSON.parse(await fs.readFile(path.join(EXT_DIR, 'rulesets/domains.json'), 'utf8'));
+        const nonUrls = fullDomains.filter((r) => !r.condition.urlFilter);
+        const urls = fullDomains.filter((r) => r.condition.urlFilter);
 
-      const probe = async (label, mutateManifest, mutateDomains) => {
-        const tmpExt = await fs.mkdtemp(path.join(os.tmpdir(), `probe-${label}-`));
-        try {
-          await fs.cp(EXT_DIR, tmpExt, { recursive: true });
-          const mPath = path.join(tmpExt, 'manifest.json');
-          const m = JSON.parse(await fs.readFile(mPath, 'utf8'));
-          if (mutateManifest) mutateManifest(m);
-          await fs.writeFile(mPath, JSON.stringify(m));
-          if (mutateDomains) {
-            const dPath = path.join(tmpExt, 'rulesets/domains.json');
-            const rules = JSON.parse(await fs.readFile(dPath, 'utf8'));
-            await fs.writeFile(dPath, JSON.stringify(mutateDomains(rules)));
+        const canLaunch = async (subUrls) => {
+          await fs.writeFile(path.join(tmpExt, 'rulesets/domains.json'), JSON.stringify([...nonUrls, ...subUrls]));
+          try {
+            const b = await puppeteer.launch({
+              executablePath: CHROME_BIN,
+              headless: false,
+              enableExtensions: true,
+              timeout: 6000,
+              args: [
+                '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
+                `--disable-extensions-except=${tmpExt}`, `--load-extension=${tmpExt}`
+              ]
+            });
+            await b.close();
+            return true;
+          } catch {
+            return false;
           }
-          const t0 = Date.now();
-          const b = await puppeteer.launch({
-            executablePath: CHROME_BIN,
-            headless: false,
-            enableExtensions: true,
-            timeout: 15000,
-            args: [
-              '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
-              `--disable-extensions-except=${tmpExt}`, `--load-extension=${tmpExt}`
-            ]
-          });
-          await b.close();
-          return `${label}=ok(${Date.now() - t0}ms)`;
-        } catch (e) {
-          return `${label}=fail(${e.message.slice(0, 35)})`;
-        } finally {
-          await fs.rm(tmpExt, { recursive: true, force: true });
+        };
+
+        const mid0 = Math.floor(urls.length / 2);
+        const h1 = await canLaunch(urls.slice(0, mid0));
+        const h2 = await canLaunch(urls.slice(mid0));
+        let diag = `totalUrls=${urls.length} h1=${h1} h2=${h2}`;
+
+        if (h1 !== h2) {
+          let lo = h1 ? mid0 : 0;
+          let hi = h1 ? urls.length : mid0;
+          while (hi - lo > 1) {
+            const mid = Math.floor((lo + hi) / 2);
+            const ok = await canLaunch(urls.slice(lo, mid));
+            if (ok) lo = mid;
+            else hi = mid;
+          }
+          diag += ` culpritIdx=${lo} culprit=${JSON.stringify(urls[lo])}`;
+        } else if (h1 && h2) {
+          const p2500 = await canLaunch(urls.slice(0, 2500));
+          const p3000 = await canLaunch(urls.slice(0, 3000));
+          diag += ` p2500=${p2500} p3000=${p3000}`;
         }
-      };
-
-      const r1 = await probe('noDomains4', (m) => {
-        m.declarative_net_request.rule_resources = m.declarative_net_request.rule_resources.filter((r) => r.id !== 'domains_4');
-      });
-      const r2 = await probe('noDomains1', (m) => {
-        m.declarative_net_request.rule_resources = m.declarative_net_request.rule_resources.filter((r) => r.id !== 'domains');
-      });
-      const r3 = await probe('noRemoveparam', null, (rules) => rules.filter((r) => r.action.type !== 'redirect'));
-      const r4 = await probe('noUrlsInDomains', null, (rules) => rules.filter((r) => !r.condition.urlFilter));
-
-      throw new Error(`Launch fail (${launchErr.message}); bare=${bareOk}; ${r1}; ${r2}; ${r3}; ${r4}`);
+        throw new Error(`Launch fail (${launchErr.message}); ${diag}`);
+      } finally {
+        await fs.rm(tmpExt, { recursive: true, force: true });
+      }
     }
     console.log('[test-browser] Chrome launched.');
 
