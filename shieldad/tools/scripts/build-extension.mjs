@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { deflateSync } from 'node:zlib';
 import path from 'node:path';
@@ -8,7 +8,13 @@ import { isValidDnrRule } from '../src/filter-parser.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SOURCE = path.join(ROOT, 'extension');
 const DIST = path.join(ROOT, 'dist');
-const FILES = ['background.js', 'background.html', 'content.js', 'custom-rules.js', 'popup.html', 'popup.css', 'popup.js', 'options.html', 'options.css', 'options.js', 'cosmetic.json'];
+const FILES = [
+  'background.js', 'background.html', 'content.js', 'custom-rules.js',
+  'scriptlets.js', 'scriptlets-data.js',
+  'popup.html', 'popup.css', 'popup.js',
+  'options.html', 'options.css', 'options.js',
+  'cosmetic.json'
+];
 
 function crc32(buffer) {
   let crc = 0xffffffff;
@@ -44,8 +50,9 @@ function icon(size) {
   return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))]);
 }
 
-const ALL_RULESETS = ['ads', 'domains', 'domains_2', 'domains_3'];
+const ALL_RULESETS = ['ads', 'domains', 'domains_2', 'domains_3', 'domains_4', 'domains_5', 'domains_6', 'domains_7', 'domains_8'];
 const activeRulesets = [];
+let totalRegexRules = 0;
 for (const name of ALL_RULESETS) {
   const filePath = path.join(SOURCE, `rulesets/${name}.json`);
   let raw;
@@ -65,8 +72,13 @@ for (const name of ALL_RULESETS) {
   if (new Set(rules.map((rule) => rule.id)).size !== rules.length) throw new Error(`Duplicate DNR rule IDs in ${name}.json`);
   const invalidIndex = rules.findIndex((rule) => !isValidDnrRule(rule));
   if (invalidIndex >= 0) throw new Error(`Invalid DNR rule in ${name}.json at index ${invalidIndex}`);
+  totalRegexRules += rules.filter((rule) => rule.condition?.regexFilter).length;
   activeRulesets.push(name);
 }
+if (totalRegexRules > 1000) throw new Error(`Total static regex rules (${totalRegexRules}) exceed MV3 limit of 1,000`);
+
+const resourceDir = path.join(SOURCE, 'resources');
+const resourceFiles = await readdir(resourceDir);
 
 await rm(DIST, { recursive: true, force: true });
 await mkdir(DIST, { recursive: true });
@@ -77,7 +89,9 @@ for (const browser of ['chrome', 'firefox']) {
   const target = path.join(DIST, `shieldad-${browser}`);
   await mkdir(path.join(target, 'rulesets'), { recursive: true });
   await mkdir(path.join(target, 'icons'), { recursive: true });
+  await mkdir(path.join(target, 'resources'), { recursive: true });
   for (const file of FILES) await copyFile(path.join(SOURCE, file), path.join(target, file));
+  for (const resFile of resourceFiles) await copyFile(path.join(resourceDir, resFile), path.join(target, 'resources', resFile));
   await copyFile(path.join(ROOT, 'tools/src/filter-parser.mjs'), path.join(target, 'filter-parser.js'));
   for (const name of activeRulesets) await copyFile(path.join(SOURCE, `rulesets/${name}.json`), path.join(target, `rulesets/${name}.json`));
   for (const size of [16, 32, 48, 128]) await copyFile(path.join(SOURCE, `icons/icon-${size}.png`), path.join(target, `icons/icon-${size}.png`));
@@ -90,5 +104,5 @@ for (const browser of ['chrome', 'firefox']) {
   const archive = path.join(DIST, `shieldad-${browser}-1.0.0.zip`);
   const zipped = spawnSync('zip', ['-q', '-r', archive, '.'], { cwd: target, stdio: 'inherit' });
   if (zipped.status !== 0) throw new Error(`Could not package ${browser} extension`);
-  console.log(`Built ${target} (${activeRulesets.length} rulesets) and ${archive}`);
+  console.log(`Built ${target} (${activeRulesets.length} rulesets, ${totalRegexRules} regex) and ${archive}`);
 }

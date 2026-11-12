@@ -45,18 +45,20 @@ npm run build:extension
 
 ### Shared list pipeline
 
-The downloader reads the official raw GitHub sources for EasyList's general, ad-server, third-party, site-specific, and allowlist components; EasyPrivacy's general, specific, third-party, tracking-server, and allowlist components; and StevenBlack's unified hosts file. If a raw GitHub host is unavailable, it retries through the GitHub Contents API. Failed downloads are fatal; ShieldAd never silently substitutes stale or sample data.
+The downloader reads the official raw GitHub sources for EasyList's general, ad-server, third-party, site-specific, and allowlist components; EasyPrivacy's general, specific, third-party, tracking-server, and allowlist components; uBlock Origin's uAssets (`filters`, `filters-2020..2026`, `general`, `mobile`, `privacy`, `removeparam`, `badware`, `resource-abuse`, `quick-fixes`, `unbreak`, `ubol`) + Peter Lowe's serverlist; and StevenBlack's unified hosts file. If a raw GitHub host is unavailable, it retries through the GitHub Contents API. Failed downloads are fatal; ShieldAd never silently substitutes stale or sample data.
 
 Generated files:
 
 | File | Contents |
 | --- | --- |
-| `extension/rulesets/ads.json` | Up to 29,000 high-priority DNR rules (all `@@` exceptions, conditional rules, URL patterns, and top root ad/tracking domains) within Chrome's 30,000 guaranteed static budget |
-| `extension/rulesets/domains.json`, `domains_2.json`, `domains_3.json` | Additional folded domain rules across up to 29,000-rule static rulesets covering remaining EasyList/EasyPrivacy and StevenBlack hosts entries |
-| `extension/cosmetic.json` | Global selectors, per-domain and `brand.*` selectors, `#@#` exceptions, and `$generichide`/`$elemhide` exclusions |
+| `extension/rulesets/ads.json` | Up to 29,000 high-priority DNR rules (`@@` exceptions, `$redirect=` stubs, `$csp=` headers, conditional rules, RE2-safe `/regex/` rules, URL patterns, and top root ad/tracking domains) within Chrome's 30,000 guaranteed static budget |
+| `extension/rulesets/domains.json`..`domains_8.json` | Condition-bucketed `$removeparam=` rules and remaining folded domain rules across up to 29,000-rule static rulesets covering EasyList, EasyPrivacy, uAssets, Peter Lowe, and StevenBlack hosts entries |
+| `extension/cosmetic.json` | Global selectors, per-domain and `brand.*` selectors, `:style(...)` overrides, procedural selectors (`:has-text`, `:upward`, `:matches-path`, etc.), `#@#` exceptions, and `$generichide`/`$elemhide` exclusions |
+| `extension/scriptlets-data.js` | Precompiled vetted anti-adblock scriptlet table injected in `MAIN` world on non-YouTube sites via `chrome.scripting.registerContentScripts` |
+| `extension/resources/*` | MV3 `web_accessible_resources` redirect stubs (`noop.js`, `google-ima.js`, `gpt.js`, `gtm.js`, `analytics.js`, `adsbygoogle.js`, `apstag.js`, `prebid.js`, `fuckadblock.js`, `1x1.gif`, etc.) |
 | `android/app/src/main/assets/blocklist.txt` | Sorted, deduplicated domains from hosts entries and `||domain^` filters |
 
-Supported network syntax includes `||domain^`, URL wildcards and separators, `@@` exceptions, `$third-party`/`$~third-party`, `$important`, `$domain=`, `$script`, `$image`, `$xmlhttprequest`, and the other basic DNR resource types. Unsupported semantic modifiers (for example redirects) are skipped instead of being compiled with different behavior.
+Supported network syntax includes `||domain^`, URL wildcards and separators, `@@` exceptions, `$third-party`/`$3p`, `$~third-party`/`$1p`, `$important`, `$domain=`/`$from=`, `$to=`, `$denyallow=`, `$badfilter`, `$redirect=` (mapped to bundled local stubs), `$removeparam=`, `$csp=`, RE2-safe `/regex/` rules, and DNR resource types (`script`, `image`, `css`/`stylesheet`, `xhr`/`xmlhttprequest`, `frame`/`subdocument`, `doc`/`document`, etc.). Unsupported semantic modifiers (for example `popup` or `redirect-rule`) are skipped instead of being compiled with different behavior.
 
 For deterministic development only, `SHIELDAD_OFFLINE_FIXTURES=1 npm run build-lists` reads `tools/fixtures/*.txt`. Normal builds always use the live upstream lists.
 

@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "ShieldAd",
   "version": "1.0.0",
-  "description": "Fast network and cosmetic ad blocking with per-site controls.",
-  "permissions": ["declarativeNetRequest", "declarativeNetRequestFeedback", "storage", "alarms", "tabs"],
+  "description": "Fast network, cosmetic, and anti-adblock protection with per-site controls.",
+  "permissions": ["declarativeNetRequest", "declarativeNetRequestFeedback", "scripting", "storage", "alarms", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": {
@@ -19,12 +19,21 @@
     "run_at": "document_start",
     "all_frames": true
   }],
+  "web_accessible_resources": [{
+    "resources": ["resources/*"],
+    "matches": ["http://*/*", "https://*/*"]
+  }],
   "declarative_net_request": {
     "rule_resources": [
       { "id": "ads", "enabled": true, "path": "rulesets/ads.json" },
       { "id": "domains", "enabled": true, "path": "rulesets/domains.json" },
       { "id": "domains_2", "enabled": true, "path": "rulesets/domains_2.json" },
-      { "id": "domains_3", "enabled": true, "path": "rulesets/domains_3.json" }
+      { "id": "domains_3", "enabled": true, "path": "rulesets/domains_3.json" },
+      { "id": "domains_4", "enabled": true, "path": "rulesets/domains_4.json" },
+      { "id": "domains_5", "enabled": true, "path": "rulesets/domains_5.json" },
+      { "id": "domains_6", "enabled": true, "path": "rulesets/domains_6.json" },
+      { "id": "domains_7", "enabled": true, "path": "rulesets/domains_7.json" },
+      { "id": "domains_8", "enabled": true, "path": "rulesets/domains_8.json" }
     ]
   }
 }

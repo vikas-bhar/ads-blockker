@@ -19,7 +19,7 @@ function createChromeMock({
     domains_3: [{ id: 1, priority: 1, action: { type: 'block' }, condition: { requestDomains: ['tail-ads.example'] } }]
   },
   cosmetic = {
-    version: 1,
+    version: 2,
     global: ['.global-ad', '.shared-banner'],
     domains: {
       'news.example': ['.news-ad'],
@@ -29,18 +29,33 @@ function createChromeMock({
     exceptions: {
       'news.example': ['.shared-banner']
     },
+    styles: {
+      'news.example': [{ s: '.locked-scroll', c: 'overflow: visible !important' }]
+    },
+    procedural: {
+      'news.example': [{ b: 'article', o: [{ k: 'has-text', v: 'Sponsored' }], a: { k: 'hide' } }]
+    },
     generichide: ['gh-site.example'],
     elemhide: ['nohide.example']
   },
   remoteResponses = {},
   rejectAllowAllRequests = false,
   maxStaticRulesets = 4,
-  initialEnabledRulesets = null
+  initialEnabledRulesets = null,
+  matchedRulesByTab = {
+    7: [{ rule: { ruleId: 1, rulesetId: 'ads' } }, { rule: { ruleId: 2, rulesetId: 'domains' } }, { rule: { ruleId: 3, rulesetId: 'ads' } }],
+    8: [{ rule: { ruleId: 300000, rulesetId: '_dynamic' } }, { rule: { ruleId: 999999, rulesetId: '_dynamic' } }]
+  },
+  tabsById = {
+    7: { id: 7, url: 'https://news.example/story' },
+    8: { id: 8, url: 'https://paused.example/home' }
+  }
 } = {}) {
   const syncStore = {};
   const localStore = {};
   const dynamicRules = new Map();
   const disabledStaticRules = new Map();
+  let registeredScripts = [];
   let enabledRulesets = initialEnabledRulesets ? [...initialEnabledRulesets] : Object.keys(rulesets);
   const listeners = {
     onInstalled: [],
@@ -111,6 +126,22 @@ function createChromeMock({
       },
       onChanged: { addListener: (fn) => listeners.onChanged.push(fn) }
     },
+    scripting: {
+      getRegisteredContentScripts: async ({ ids } = {}) => clone(
+        ids ? registeredScripts.filter((s) => ids.includes(s.id)) : registeredScripts
+      ),
+      registerContentScripts: async (scripts) => {
+        for (const s of scripts) {
+          registeredScripts = [...registeredScripts.filter((x) => x.id !== s.id), clone(s)];
+        }
+      },
+      unregisterContentScripts: async ({ ids } = {}) => {
+        registeredScripts = ids ? registeredScripts.filter((s) => !ids.includes(s.id)) : [];
+      }
+    },
+    tabs: {
+      get: async (tabId) => tabsById[tabId] || null
+    },
     declarativeNetRequest: {
       getDynamicRules: async () => clone([...dynamicRules.values()]),
       updateDynamicRules: async ({ removeRuleIds = [], addRules = [] }) => {
@@ -143,7 +174,7 @@ function createChromeMock({
       setExtensionActionOptions: async ({ displayActionCountAsBadgeText }) => {
         badge.actionCount = Boolean(displayActionCountAsBadgeText);
       },
-      getMatchedRules: async ({ tabId }) => ({ rulesMatchedInfo: tabId === 7 ? [{}, {}, {}] : [] })
+      getMatchedRules: async ({ tabId }) => ({ rulesMatchedInfo: matchedRulesByTab[tabId] || [] })
     },
     action: {
       setBadgeBackgroundColor: async ({ color }) => { badge.color = color; },
@@ -187,7 +218,8 @@ function createChromeMock({
     badge,
     listeners,
     sendMessage,
-    getEnabledRulesets: () => [...enabledRulesets]
+    getEnabledRulesets: () => [...enabledRulesets],
+    getRegisteredScripts: () => clone(registeredScripts)
   };
 }
 
@@ -244,7 +276,7 @@ async function bootBackground(mock) {
 }
 
 describe('extension custom rules & background runtime', () => {
-  it('compiles custom network and cosmetic rules and normalizes allowlist URLs', async () => {
+  it('compiles custom network, $redirect, and extended cosmetic rules and normalizes allowlist URLs', async () => {
     const mock = createChromeMock();
     const { customMod } = await bootBackground(mock);
     const { compileUserRules, normalizeDomainList } = customMod.namespace;
@@ -254,19 +286,27 @@ describe('extension custom rules & background runtime', () => {
       '||custom-ad.example^',
       '@@||needed.example^',
       '||forced.example^$important',
+      '||adscript.example/tag.js$script,redirect=noop.js',
       'example.com##.promo-box',
+      'example.com##div:style(opacity: 1 !important)',
+      'example.com#?#article:has-text(Sponsored)',
       'example.com#@#.ad',
       'bad.example##+js(nope)',
-      '||broken^$unknownmod=1'
+      '||broken^$unknownmod=1',
+      '||bad.example^$badfilter'
     ].join('\n'));
 
-    expect(compiled.networkRules).toHaveLength(3);
-    expect(compiled.networkRules[0].priority).toBe(300); // custom @@ allow
-    expect(compiled.networkRules[1].priority).toBe(10); // custom block
-    expect(compiled.networkRules[2].priority).toBe(450); // custom $important block
+    expect(compiled.networkRules).toHaveLength(4);
+    const byPriority = compiled.networkRules.map((r) => r.priority);
+    expect(byPriority).toContain(300); // custom @@ allow
+    expect(byPriority).toContain(55); // custom $redirect
+    expect(byPriority).toContain(10); // custom block
+    expect(byPriority).toContain(450); // custom $important block
     expect(compiled.cosmetic.domains['example.com']).toEqual(['.promo-box']);
+    expect(compiled.cosmetic.styles['example.com']).toEqual([{ s: 'div', c: 'opacity: 1 !important;' }]);
+    expect(compiled.cosmetic.procedural['example.com']).toHaveLength(1);
     expect(compiled.cosmetic.exceptions['example.com']).toEqual(['.ad']);
-    expect(compiled.invalidLines).toEqual(['bad.example##+js(nope)', '||broken^$unknownmod=1']);
+    expect(compiled.invalidLines).toEqual(['bad.example##+js(nope)', '||broken^$unknownmod=1', '||bad.example^$badfilter']);
 
     expect(normalizeDomainList(['https://Sub.Example.com/path', '*.Other.org.', '0.0.0.0', 'bad'])).toEqual([
       'sub.example.com',
@@ -274,14 +314,18 @@ describe('extension custom rules & background runtime', () => {
     ]);
   });
 
-  it('handles global toggle, site pause with allowAllRequests, and concurrent updates cleanly', async () => {
+  it('handles global toggle, MAIN-world scriptlet registration (excluding YouTube & paused sites), and concurrent updates', async () => {
     const mock = createChromeMock();
     await bootBackground(mock);
 
     expect(mock.getEnabledRulesets()).toEqual(['ads', 'domains', 'domains_2', 'domains_3']);
     expect(mock.badge.actionCount).toBe(true);
+    const initialScripts = mock.getRegisteredScripts();
+    expect(initialScripts).toHaveLength(1);
+    expect(initialScripts[0].world).toBe('MAIN');
+    expect(initialScripts[0].excludeMatches).toContain('*://*.youtube.com/*');
+    expect(initialScripts[0].excludeMatches).toContain('*://youtube.com/*');
 
-    // Rapid concurrent toggles should serialize without duplicate ID errors
     const [r1, r2] = await Promise.all([
       mock.sendMessage({ type: 'APPLY_SETTINGS', patch: { pausedSites: ['https://news.example/story'] } }),
       mock.sendMessage({ type: 'APPLY_SETTINGS', patch: { enabled: false } })
@@ -290,6 +334,7 @@ describe('extension custom rules & background runtime', () => {
     expect(r2.ok).toBe(true);
 
     expect(mock.getEnabledRulesets()).toEqual([]);
+    expect(mock.getRegisteredScripts()).toEqual([]);
     expect(mock.badge.text).toBe('OFF');
     expect(mock.badge.actionCount).toBe(false);
     const dynOff = [...mock.dynamicRules.values()];
@@ -299,18 +344,34 @@ describe('extension custom rules & background runtime', () => {
     const r3 = await mock.sendMessage({ type: 'APPLY_SETTINGS', patch: { enabled: true } });
     expect(r3.ok).toBe(true);
     expect(mock.getEnabledRulesets()).toEqual(['ads', 'domains', 'domains_2', 'domains_3']);
+    expect(mock.getRegisteredScripts()[0].excludeMatches).toContain('*://news.example/*');
     expect(mock.badge.text).toBe('');
     expect(mock.badge.actionCount).toBe(true);
     expect(mock.dynamicRules.has(999999)).toBe(false);
   });
 
-  it('applies generichide, elemhide, brand.* matching, cosmetic exceptions, and custom cosmetics', async () => {
+  it('excludes internal pause/allow rules from getTabStats and reports 0 for paused tabs', async () => {
+    const mock = createChromeMock();
+    await bootBackground(mock);
+
+    const activeStats = await mock.sendMessage({ type: 'GET_TAB_STATS', tabId: 7 });
+    expect(activeStats.blockedCount).toBe(3);
+
+    const dynamicOnlyStats = await mock.sendMessage({ type: 'GET_TAB_STATS', tabId: 8 });
+    expect(dynamicOnlyStats.blockedCount).toBe(0);
+
+    await mock.sendMessage({ type: 'APPLY_SETTINGS', patch: { pausedSites: ['news.example'] } });
+    const pausedStats = await mock.sendMessage({ type: 'GET_TAB_STATS', tabId: 7 });
+    expect(pausedStats.blockedCount).toBe(0);
+  });
+
+  it('applies generichide, elemhide, brand.* matching, cosmetic exceptions, styles, procedural, and custom cosmetics', async () => {
     const mock = createChromeMock();
     await bootBackground(mock);
 
     await mock.sendMessage({
       type: 'APPLY_SETTINGS',
-      patch: { customRules: 'news.example##.custom-news-ad\n##.custom-global-ad' }
+      patch: { customRules: 'news.example##.custom-news-ad\nnews.example##.custom-box:style(border: 0)\n##.custom-global-ad' }
     });
 
     const newsCosmetic = await mock.sendMessage({ type: 'GET_COSMETIC', hostname: 'www.news.example' });
@@ -320,6 +381,8 @@ describe('extension custom rules & background runtime', () => {
     expect(newsCosmetic.selectors).toContain('.custom-news-ad');
     expect(newsCosmetic.selectors).toContain('.custom-global-ad');
     expect(newsCosmetic.selectors).not.toContain('.shared-banner');
+    expect(newsCosmetic.styles).toHaveLength(2);
+    expect(newsCosmetic.procedural).toHaveLength(1);
 
     const tripCosmetic = await mock.sendMessage({ type: 'GET_COSMETIC', hostname: 'www.tripadvisor.co.uk' });
     expect(tripCosmetic.selectors).toContain('.trip-promo');
@@ -350,7 +413,6 @@ describe('extension custom rules & background runtime', () => {
     expect(badRes.ok).toBe(true);
     expect(badRes.appliedCustom).toBe(false);
     expect(badRes.status.customRulesError).toContain('Invalid rule');
-    // System allowlist rules still applied despite bad custom rule!
     expect([...mock.dynamicRules.values()].some((r) => r.condition.requestDomains?.includes('trusted.example'))).toBe(true);
   });
 
@@ -365,15 +427,15 @@ describe('extension custom rules & background runtime', () => {
         ],
         'rulesets/domains_2.json': null,
         'rulesets/domains_3.json': null,
-        'cosmetic.json': { version: 1, global: ['.updated-ad'], domains: {}, exceptions: {}, generichide: [], elemhide: [] }
+        'cosmetic.json': { version: 2, global: ['.updated-ad'], domains: {}, exceptions: {}, styles: {}, procedural: {}, generichide: [], elemhide: [] }
       }
     });
     await bootBackground(mock);
 
     const update = await mock.sendMessage({ type: 'UPDATE_FILTERS' });
     expect(update.ok).toBe(true);
-    expect(update.count).toBe(1); // only new-adserver.example, not duplicate taboola.com
-    expect(update.disabledStaticCount).toBe(1); // doubleclick.net was removed in remote ads.json
+    expect(update.count).toBe(1);
+    expect(update.disabledStaticCount).toBe(1);
     expect(mock.disabledStaticRules.get('ads').has(1)).toBe(true);
     expect([...mock.dynamicRules.values()].some((r) => r.condition.requestDomains?.includes('new-adserver.example'))).toBe(true);
 
@@ -388,8 +450,71 @@ describe('extension custom rules & background runtime', () => {
   });
 });
 
+describe('MAIN-world scriptlets runner', () => {
+  it('executes vetted anti-adblock scriptlets on normal sites and never runs on YouTube', () => {
+    const scriptletSrc = fs.readFileSync(path.join(EXT_DIR, 'scriptlets.js'), 'utf8');
+
+    const runScriptletsForHost = (hostname) => {
+      const ctx = {
+        window: null,
+        self: null,
+        location: { hostname },
+        Object,
+        Reflect,
+        Proxy,
+        RegExp,
+        Error,
+        Set,
+        Map,
+        Array,
+        String,
+        Number,
+        Boolean,
+        JSON,
+        Promise,
+        Math,
+        console,
+        document: { querySelectorAll: () => [] },
+        setTimeout: (fn) => fn,
+        setInterval: (fn) => fn,
+        open: () => ({ closed: false }),
+        fetch: async () => ({ status: 200 }),
+        XMLHttpRequest: function XHR() {},
+        EventTarget: function ET() {},
+        __shieldadScriptletData: {
+          actions: [
+            ['set', 'adBlockDetected', 'false'],
+            ['nowoif', '/popup\\.example/'],
+            ['aopr', 'blockDetector'],
+            ['nano-stb', 'countdown', '1000', '0.02']
+          ],
+          domains: {
+            'example.*': [0, 1, 2, 3],
+            'youtube.com': [0]
+          }
+        }
+      };
+      ctx.window = ctx;
+      ctx.self = ctx;
+      ctx.XMLHttpRequest.prototype = { open: () => {}, send: () => {} };
+      ctx.EventTarget.prototype = { addEventListener: () => {} };
+      const sandbox = vm.createContext(ctx);
+      vm.runInContext(scriptletSrc, sandbox);
+      return sandbox;
+    };
+
+    const site = runScriptletsForHost('www.example.co.uk');
+    expect(site.adBlockDetected).toBe(false);
+    expect(() => site.blockDetector).toThrow('ShieldAd aborted script execution');
+    expect(site.open('https://popup.example/ad')).toBeNull();
+
+    const yt = runScriptletsForHost('www.youtube.com');
+    expect(yt.adBlockDetected).toBeUndefined();
+  });
+});
+
 describe('content script cosmetic engine', () => {
-  it('installs batched CSS without per-selector scanning, repairs bad batches, and restores hidden elements on toggle off', async () => {
+  it('applies CSS, :style(), procedural :has-text/:upward, repairs bad batches, and restores styles on toggle off', async () => {
     const contentSrc = fs.readFileSync(path.join(EXT_DIR, 'content.js'), 'utf8');
 
     class FakeStyleProps {
@@ -401,7 +526,7 @@ describe('content script cosmetic engine', () => {
     }
 
     class FakeElement {
-      constructor(tag, classes = []) {
+      constructor(tag, classes = [], textContent = '') {
         this.nodeType = 1;
         this.tagName = tag;
         this.classes = classes;
@@ -410,7 +535,7 @@ describe('content script cosmetic engine', () => {
         this.children = [];
         this.parentElement = null;
         this.isConnected = true;
-        this._text = '';
+        this._text = textContent;
       }
       appendChild(child) {
         child.parentElement = this;
@@ -434,12 +559,18 @@ describe('content script cosmetic engine', () => {
           };
         }
       }
-      get textContent() { return this._text; }
+      get textContent() {
+        if (this.tagName !== 'STYLE' && this.children.length) {
+          return this._text + this.children.map((c) => c.textContent).join('');
+        }
+        return this._text;
+      }
       matches(selector) {
         if (selector.includes('::invalid(')) throw new SyntaxError('Bad selector');
         return selector.split(',').some((part) => {
           const trimmed = part.trim();
-          return trimmed.startsWith('.') && this.classes.includes(trimmed.slice(1));
+          if (trimmed.startsWith('.')) return this.classes.includes(trimmed.slice(1));
+          return trimmed.toUpperCase() === this.tagName;
         });
       }
       querySelectorAll(selector) {
@@ -463,10 +594,16 @@ describe('content script cosmetic engine', () => {
     const body = new FakeElement('BODY');
     const adEl = new FakeElement('DIV', ['ad-banner']);
     adEl.style.setProperty('display', 'block', 'important');
-    const safeEl = new FakeElement('DIV', ['article']);
+    const sponsoredCard = new FakeElement('ARTICLE', ['card']);
+    sponsoredCard.appendChild(new FakeElement('SPAN', ['badge'], 'Sponsored Post'));
+    const organicCard = new FakeElement('ARTICLE', ['card']);
+    organicCard.appendChild(new FakeElement('SPAN', ['badge'], 'Organic News'));
+    const safeEl = new FakeElement('DIV', ['article'], 'Real Article');
     root.appendChild(head);
     root.appendChild(body);
     body.appendChild(adEl);
+    body.appendChild(sponsoredCard);
+    body.appendChild(organicCard);
     body.appendChild(safeEl);
 
     let active = true;
@@ -481,7 +618,7 @@ describe('content script cosmetic engine', () => {
 
     const sandbox = vm.createContext({
       Node: { ELEMENT_NODE: 1 },
-      location: { hostname: 'site.example' },
+      location: { hostname: 'site.example', pathname: '/feed' },
       document: {
         contentType: 'text/html',
         documentElement: root,
@@ -491,11 +628,17 @@ describe('content script cosmetic engine', () => {
       MutationObserver: FakeMutationObserver,
       requestAnimationFrame: (fn) => fn(),
       cancelAnimationFrame: () => {},
+      addEventListener: () => {},
       chrome: {
         runtime: {
           sendMessage: async () => active
-            ? { active: true, selectors: ['.ad-banner', '::invalid(x)'] }
-            : { active: false, selectors: [] }
+            ? {
+                active: true,
+                selectors: ['.ad-banner', '::invalid(x)'],
+                styles: [{ s: '.article', c: 'overflow: visible !important' }],
+                procedural: [{ b: 'article', o: [{ op: 'has-text', literal: 'Sponsored' }], a: { type: 'hide' } }]
+              }
+            : { active: false, selectors: [], styles: [], procedural: [] }
         },
         storage: {
           onChanged: { addListener: (fn) => storageListeners.push(fn) }
@@ -504,7 +647,9 @@ describe('content script cosmetic engine', () => {
       WeakMap,
       Set,
       Array,
-      String
+      String,
+      RegExp,
+      Map
     });
 
     vm.runInContext(contentSrc, sandbox);
@@ -512,23 +657,24 @@ describe('content script cosmetic engine', () => {
 
     const styleEl = head.children.find((el) => el.dataset.shieldad === 'cosmetic');
     expect(styleEl).toBeTruthy();
-    expect(styleEl.textContent).toBe('.ad-banner{display:none !important;}');
+    expect(styleEl.textContent).toContain('.ad-banner{display:none !important;}');
+    expect(styleEl.textContent).toContain('.article{overflow: visible !important}');
     expect(adEl.style.getPropertyValue('display')).toBe('none');
-    expect(adEl.style.getPropertyPriority('display')).toBe('important');
+    expect(sponsoredCard.style.getPropertyValue('display')).toBe('none');
+    expect(organicCard.style.getPropertyValue('display')).toBe('');
     expect(safeEl.style.getPropertyValue('display')).toBe('');
 
-    // Page removes style tag -> observer re-attaches it
     styleEl.remove();
     expect(styleEl.isConnected).toBe(false);
     observerCallback([{ removedNodes: [styleEl], addedNodes: [] }]);
     expect(styleEl.isConnected).toBe(true);
 
-    // Protection toggled OFF -> restores original display: block !important!
     active = false;
     for (const fn of storageListeners) fn({ enabled: { oldValue: true, newValue: false } }, 'sync');
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(styleEl.textContent).toBe('');
     expect(adEl.style.getPropertyValue('display')).toBe('block');
     expect(adEl.style.getPropertyPriority('display')).toBe('important');
+    expect(sponsoredCard.style.getPropertyValue('display')).toBe('');
   });
 });

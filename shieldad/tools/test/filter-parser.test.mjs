@@ -4,15 +4,19 @@ import {
   compileDomainRuleChunks,
   compileDomainRules,
   compileNetworkRules,
+  compileScriptlets,
   compileStaticRulesets,
   domainFromNetworkFilter,
   hostMatches,
+  isSafeRe2Pattern,
   isValidDnrRule,
   normalizeDomainEntry,
   parseCosmeticControlFilter,
   parseCosmeticFilter,
+  parseExtendedCosmeticFilter,
   parseHostsLine,
-  parseNetworkFilter
+  parseNetworkFilter,
+  parseScriptletFilter
 } from '../src/filter-parser.mjs';
 
 describe('network filter parser', () => {
@@ -62,27 +66,101 @@ describe('network filter parser', () => {
     expect(parseNetworkFilter('@@$csp=script-src self,domain=example.com')).toBeNull();
   });
 
-  it('maps script, image and xmlhttprequest options', () => {
-    expect(parseNetworkFilter('||ads.example.com^$script,image,xmlhttprequest').condition.resourceTypes)
-      .toEqual(['script', 'image', 'xmlhttprequest']);
+  it('maps modern resource types, 1p/3p aliases, from=, to=, and denyallow=', () => {
+    const rule = parseNetworkFilter('||tracker.example^$xhr,css,frame,3p,from=news.example|~sub.news.example');
+    expect(rule.condition).toEqual({
+      requestDomains: ['tracker.example'],
+      domainType: 'thirdParty',
+      resourceTypes: ['xmlhttprequest', 'stylesheet', 'sub_frame'],
+      initiatorDomains: ['news.example'],
+      excludedInitiatorDomains: ['sub.news.example']
+    });
+
+    const toRule = parseNetworkFilter('$1p,doc,to=ad.example|~good.ad.example');
+    expect(toRule.condition).toEqual({
+      domainType: 'firstParty',
+      resourceTypes: ['main_frame'],
+      requestDomains: ['ad.example'],
+      excludedRequestDomains: ['good.ad.example']
+    });
+
+    const denyAllow = parseNetworkFilter('*$3p,script,domain=site.example,denyallow=cdn.example|api.example');
+    expect(denyAllow.condition.excludedRequestDomains).toEqual(['cdn.example', 'api.example']);
   });
 
-  it('maps third-party and first-party options', () => {
-    expect(parseNetworkFilter('||ads.example.com^$third-party').condition.domainType).toBe('thirdParty');
-    expect(parseNetworkFilter('||ads.example.com^$~third-party').condition.domainType).toBe('firstParty');
+  it('compiles $redirect=, $csp=, $removeparam=, safe /regex/, and $badfilter', () => {
+    const redir = parseNetworkFilter('||ads.example.com/ima3.js$script,redirect=google-ima.js');
+    expect(redir).toMatchObject({
+      kind: 'redirect',
+      priority: 50,
+      action: { type: 'redirect', redirect: { extensionPath: '/resources/google-ima.js' } },
+      condition: { urlFilter: '||ads.example.com/ima3.js', resourceTypes: ['script'] }
+    });
+
+    const csp = parseNetworkFilter('||stream.example^$csp=script-src \'self\'');
+    expect(csp).toMatchObject({
+      kind: 'csp',
+      action: {
+        type: 'modifyHeaders',
+        responseHeaders: [{ header: 'content-security-policy', operation: 'append', value: "script-src 'self'" }]
+      },
+      condition: { requestDomains: ['stream.example'], resourceTypes: ['main_frame', 'sub_frame'] }
+    });
+
+    const rp = parseNetworkFilter('||shop.example^$removeparam=utm_source');
+    expect(rp).toMatchObject({
+      kind: 'removeparam',
+      action: { type: 'redirect', redirect: { transform: { queryTransform: { removeParams: ['utm_source'] } } } }
+    });
+
+    const regexRule = parseNetworkFilter('/ads\\/[0-9]+/$script');
+    expect(regexRule).toMatchObject({
+      isRegex: true,
+      action: { type: 'block' },
+      condition: { regexFilter: 'ads\\/[0-9]+', resourceTypes: ['script'] }
+    });
+
+    const bf = parseNetworkFilter('||ads.example.com^$badfilter');
+    expect(bf.badfilter).toBe(true);
   });
 
-  it('maps included and excluded initiator domains', () => {
-    const condition = parseNetworkFilter('/advert/*$domain=foo.com|bar.com|~www.bar.com,script').condition;
-    expect(condition.initiatorDomains).toEqual(['foo.com', 'bar.com']);
-    expect(condition.excludedInitiatorDomains).toEqual(['www.bar.com']);
-    expect(condition.resourceTypes).toEqual(['script']);
-  });
-
-  it('rejects comments, cosmetics, regex filters, non-ASCII, and unsupported modifiers', () => {
-    for (const filter of ['! comment', 'example.com##.ad', '/ads\\/[0-9]+/', '||a.com^$redirect=noop', '||a.com^$badfilter', '||a.com/рeклама']) {
+  it('rejects comments, cosmetics, unsupported modifiers, and unsafe RE2 regexes', () => {
+    for (const filter of [
+      '! comment',
+      'example.com##.ad',
+      '||a.com^$redirect-rule=noop.js',
+      '||a.com^$popup',
+      '||a.com^$unknownmod',
+      '/ads\\1/(?#backreference)/',
+      '/(?=lookahead)ad/',
+      `/${'[a-z]{40}'.repeat(2)}/`,
+      '||a.com/рeклама'
+    ]) {
       expect(parseNetworkFilter(filter)).toBeNull();
     }
+    expect(isSafeRe2Pattern('ads\\/[0-9]+')).toBe(true);
+    expect(isSafeRe2Pattern('(?=ad)')).toBe(false);
+    expect(isSafeRe2Pattern('[a-z0-9]{25}')).toBe(false);
+  });
+
+  it('cancels rules matched by $badfilter and merges $removeparam buckets by condition', () => {
+    const compiled = compileStaticRulesets({
+      priorityNetworkLines: [
+        '||blocked.example^',
+        '||blocked.example^$badfilter',
+        '||shop.example^$removeparam=utm_source',
+        '||shop.example^$removeparam=utm_medium',
+        '||shop.example^$removeparam=/^fbclid$/',
+        '||other.example^$removeparam=gclid'
+      ],
+      adserverLines: [],
+      hostsDomains: []
+    });
+    expect(compiled.ads.some((r) => r.condition.requestDomains?.includes('blocked.example'))).toBe(false);
+    const rpRules = compiled.ads.filter((r) => r.action.type === 'redirect' && r.action.redirect?.transform);
+    expect(rpRules).toHaveLength(2);
+    expect(rpRules[0].action.redirect.transform.queryTransform.removeParams).toEqual(['utm_source', 'utm_medium', 'fbclid']);
+    expect(rpRules[1].action.redirect.transform.queryTransform.removeParams).toEqual(['gclid']);
   });
 
   it('deduplicates and caps rules without dropping exceptions', () => {
@@ -113,10 +191,12 @@ describe('network filter parser', () => {
     expect(isValidDnrRule({ id: 0, priority: 1, action: { type: 'block' }, condition: { requestDomains: ['ads.example.com'] } })).toBe(false);
     expect(isValidDnrRule({ id: 1, priority: 1, action: { type: 'allowAllRequests' }, condition: { requestDomains: ['example.com'], resourceTypes: ['script'] } })).toBe(false);
     expect(isValidDnrRule({ id: 1, priority: 1, action: { type: 'allowAllRequests' }, condition: { requestDomains: ['example.com'], resourceTypes: ['main_frame', 'sub_frame'] } })).toBe(true);
+    expect(isValidDnrRule({ id: 1, priority: 50, action: { type: 'redirect', redirect: { extensionPath: '/resources/noop.js' } }, condition: { urlFilter: '||a.com/*' } })).toBe(true);
+    expect(isValidDnrRule({ id: 1, priority: 1, action: { type: 'modifyHeaders', responseHeaders: [{ header: 'content-security-policy', operation: 'append', value: "script-src 'none'" }] }, condition: { requestDomains: ['a.com'], resourceTypes: ['main_frame'] } })).toBe(true);
   });
 });
 
-describe('cosmetic, hosts, and multi-ruleset compilation', () => {
+describe('cosmetic, scriptlet, hosts, and multi-ruleset compilation', () => {
   it('parses global, child-combinator, and brand-wildcard cosmetic selectors', () => {
     expect(parseCosmeticFilter('##.advertisement')).toMatchObject({ selector: '.advertisement', domains: [] });
     expect(parseCosmeticFilter('##.ob_dual_right > .ob_ads_header ~ .odb_div')).toMatchObject({
@@ -137,7 +217,7 @@ describe('cosmetic, hosts, and multi-ruleset compilation', () => {
     expect(hostMatches('not-tripadvisor.com', 'tripadvisor.*')).toBe(false);
   });
 
-  it('compiles cosmetic exceptions, global #@#, generichide, and excludes procedural selectors', () => {
+  it('compiles standard + extended procedural/:style cosmetic rules cleanly', () => {
     const result = compileCosmeticRules([
       '##.ad', '##.removed-global', '#@#.removed-global',
       'example.com##.banner', 'example.com#@#.ad',
@@ -145,8 +225,10 @@ describe('cosmetic, hosts, and multi-ruleset compilation', () => {
       '@@$generichide,domain=androidpolice.com|xda-developers.com',
       '@@||music.amazon.$generichide',
       '@@||safe-site.example^$elemhide',
-      'bad.example##+js(alert)', 'bad.example##div:-abp-has(.ad)',
-      'bad.example##div:has-text(Sponsored)'
+      'news.example##article:has-text(Sponsored):upward(2)',
+      'news.example##div.paywall:style(overflow: visible !important)',
+      'news.example#?#div:-abp-contains(Promoted)',
+      'bad.example##+js(alert)'
     ], { generatedAt: 'now' });
     expect(result.global).toEqual(['.ad']);
     expect(result.domains['example.com']).toEqual(['.banner']);
@@ -154,9 +236,40 @@ describe('cosmetic, hosts, and multi-ruleset compilation', () => {
     expect(result.exceptions['global.example']).toEqual(['.ad']);
     expect(result.domains['mixed.example']).toEqual(['.mixed']);
     expect(result.exceptions['excluded.example']).toEqual(['.mixed']);
+    expect(result.styles['news.example']).toEqual([{ s: 'div.paywall', c: 'overflow: visible !important;' }]);
+    expect(result.procedural['news.example']).toHaveLength(2);
     expect(result.generichide).toEqual(['androidpolice.com', 'music.amazon.*', 'xda-developers.com']);
     expect(result.elemhide).toEqual(['safe-site.example']);
     expect(parseCosmeticControlFilter('@@$generichide,domain=a.com')).toEqual({ type: 'generichide', domains: ['a.com'] });
+    expect(parseExtendedCosmeticFilter('site.example##div:matches-path(/feed):has-text(Ad)')).toMatchObject({
+      kind: 'procedural',
+      domains: ['site.example'],
+      base: 'div'
+    });
+  });
+
+  it('compiles vetted scriptlets while strictly excluding YouTube hosts', () => {
+    expect(parseScriptletFilter('site.example##+js(set-constant, adsBlocked, true)')).toEqual({
+      exception: false,
+      domains: ['site.example'],
+      excludedDomains: [],
+      name: 'set',
+      args: ['adsBlocked', 'true']
+    });
+    expect(parseScriptletFilter('youtube.com##+js(set, adPlacements, undefined)')).toBeNull();
+    expect(parseScriptletFilter('www.youtube.com##+js(nostif, ad)')).toBeNull();
+    expect(parseScriptletFilter('site.example##+js(unknown-scriptlet, foo)')).toBeNull();
+
+    const compiled = compileScriptlets([
+      'site.example##+js(set, __ads, false)',
+      'site.example##+js(aopr, app_vars.force)',
+      'www.youtube.com##+js(set, bad, 1)',
+      'm.youtube.com##+js(nano-stb, block, 1000)'
+    ]);
+    expect(compiled.domains['site.example']).toEqual([0, 1]);
+    expect(compiled.domains['youtube.com']).toBeUndefined();
+    expect(compiled.domains['www.youtube.com']).toBeUndefined();
+    expect(compiled.actions).toHaveLength(2);
   });
 
   it('compiles domain rules without redundant children regardless of order and rejects IPv4', () => {
@@ -202,6 +315,9 @@ describe('cosmetic, hosts, and multi-ruleset compilation', () => {
 
   it('extracts only plain domains for Android', () => {
     expect(domainFromNetworkFilter('||ads.example.com^$third-party')).toBe('ads.example.com');
+    expect(domainFromNetworkFilter('||ads.example.com^$domain=news.com')).toBeNull();
+    expect(domainFromNetworkFilter('||ads.example.com^$script')).toBeNull();
+    expect(domainFromNetworkFilter('||ads.example.com^$redirect=noop.js')).toBeNull();
     expect(domainFromNetworkFilter('*/advertising/*')).toBeNull();
   });
 });
