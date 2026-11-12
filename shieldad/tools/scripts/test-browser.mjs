@@ -174,23 +174,42 @@ async function main() {
   let browser;
   try {
     console.log('[test-browser] Launching Chrome:', CHROME_BIN, 'with extension:', EXT_DIR);
-    browser = await puppeteer.launch({
-      executablePath: CHROME_BIN,
-      headless: false,
-      enableExtensions: true,
-      dumpio: true,
-      timeout: 90000,
-      userDataDir,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        `--disable-extensions-except=${EXT_DIR}`,
-        `--load-extension=${EXT_DIR}`,
-        `--host-resolver-rules=${hostResolverRules}`
-      ]
-    });
+    try {
+      browser = await puppeteer.launch({
+        executablePath: CHROME_BIN,
+        headless: false,
+        enableExtensions: true,
+        dumpio: true,
+        timeout: 45000,
+        userDataDir,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          `--disable-extensions-except=${EXT_DIR}`,
+          `--load-extension=${EXT_DIR}`,
+          `--host-resolver-rules=${hostResolverRules}`
+        ]
+      });
+    } catch (launchErr) {
+      // Check whether Chrome launches cleanly WITHOUT the extension so we know immediately if the extension or Chrome/Xvfb failed.
+      let bareOk = 'no';
+      try {
+        const bare = await puppeteer.launch({
+          executablePath: CHROME_BIN,
+          headless: false,
+          dumpio: true,
+          timeout: 15000,
+          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+        });
+        bareOk = 'yes';
+        await bare.close();
+      } catch (bareErr) {
+        bareOk = `err:${bareErr.message}`;
+      }
+      throw new Error(`Extension Chrome launch failed (${launchErr.message}); bare Chrome launch=${bareOk}`);
+    }
     console.log('[test-browser] Chrome launched.');
 
     const { worker, extensionId } = await waitForShieldAdWorker(browser);

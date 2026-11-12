@@ -63,7 +63,7 @@ jobs:
               tail -n 120 browser-test.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            tail -n 45 browser-test.log | while IFS= read -r line; do
+            tail -n 9 browser-test.log | while IFS= read -r line; do
               if [ -n "$line" ]; then printf '::error::%s\n' "$line"; fi
             done
           fi
