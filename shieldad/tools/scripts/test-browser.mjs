@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,14 +33,26 @@ const AD_HOSTS = [
   'openx.net'
 ];
 
-function startFixtureServer() {
+async function startFixtureServer() {
   const hits = new Map();
   const record = (host, pathname) => {
     const key = `${host}${pathname}`;
     hits.set(key, (hits.get(key) || 0) + 1);
   };
 
-  const server = http.createServer((req, res) => {
+  const tlsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'shieldad-tls-'));
+  const keyPath = path.join(tlsDir, 'key.pem');
+  const certPath = path.join(tlsDir, 'cert.pem');
+  execFileSync('openssl', [
+    'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+    '-keyout', keyPath, '-out', certPath, '-days', '1',
+    '-subj', '/CN=www.youtube.com',
+    '-addext', 'subjectAltName=DNS:www.youtube.com,DNS:*.youtube.com,DNS:localhost'
+  ], { stdio: 'ignore' });
+  const [key, cert] = await Promise.all([fs.readFile(keyPath), fs.readFile(certPath)]);
+
+  let httpServer;
+  const handler = (req, res) => {
     const host = (req.headers.host || '127.0.0.1').split(':')[0].toLowerCase();
     const url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
     record(host, url.pathname);
@@ -56,7 +70,7 @@ function startFixtureServer() {
     }
 
     if (url.pathname === '/frame.html') {
-      const port = server.address().port;
+      const port = httpServer.address().port;
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(`<!doctype html><html><body>
         <script src="http://taboola.com:${port}/iframe-ad.js"></script>
@@ -88,7 +102,7 @@ function startFixtureServer() {
       return;
     }
 
-    const port = server.address().port;
+    const port = httpServer.address().port;
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(`<!doctype html><html><head><title>ShieldAd Fixture</title></head><body>
       <div id="cosmetic-global" class="ADBox" style="display:block !important">Global Ad</div>
@@ -123,18 +137,29 @@ function startFixtureServer() {
         }, 120);
       </script>
     </body></html>`);
-  });
+  };
 
-  return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolve({
-        port: server.address().port,
-        hits,
-        resetHits: () => hits.clear(),
-        close: () => new Promise((r) => server.close(r))
-      });
-    });
-  });
+  httpServer = http.createServer(handler);
+  const httpsServer = https.createServer({ key, cert }, handler);
+
+  await Promise.all([
+    new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve)),
+    new Promise((resolve) => httpsServer.listen(0, '127.0.0.1', resolve))
+  ]);
+
+  return {
+    port: httpServer.address().port,
+    httpsPort: httpsServer.address().port,
+    hits,
+    resetHits: () => hits.clear(),
+    close: async () => {
+      await Promise.all([
+        new Promise((r) => httpServer.close(r)),
+        new Promise((r) => httpsServer.close(r))
+      ]);
+      await fs.rm(tlsDir, { recursive: true, force: true });
+    }
+  };
 }
 
 async function waitForShieldAdWorker(browser) {
@@ -184,6 +209,7 @@ async function main() {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
+        '--ignore-certificate-errors',
         '--enable-unsafe-extension-debugging',
         `--host-resolver-rules=${hostResolverRules}`
       ]
@@ -258,8 +284,8 @@ async function main() {
     assert.notEqual(apState.genericAd, 'none', '$generichide must prevent generic .ADBox hiding on androidpolice.com');
     assert.equal(apState.specificAd, 'none', 'Domain-specific rule must still hide .w-pencil-banner on androidpolice.com');
 
-    // 4. Verify YouTube ad-slot cosmetic hiding while preserving #player-ads shell & Skip overlay
-    await page.goto(`http://www.youtube.com:${server.port}/youtube.html`, { waitUntil: 'networkidle0' });
+    // 4. Verify YouTube ad-slot cosmetic hiding while preserving #player-ads shell & Skip overlay (HTTPS for HSTS preload)
+    await page.goto(`https://www.youtube.com:${server.httpsPort}/youtube.html`, { waitUntil: 'networkidle0' });
     await new Promise((r) => setTimeout(r, 250));
     const ytState = await page.evaluate(() => ({
       masthead: getComputedStyle(document.getElementById('masthead-ad')).display,
@@ -382,6 +408,7 @@ async function main() {
 }
 
 main().catch((error) => {
+  console.error(error);
   console.error('FATAL:', String(error?.message || error).replace(/\s+/g, ' '));
   process.exit(1);
 });
