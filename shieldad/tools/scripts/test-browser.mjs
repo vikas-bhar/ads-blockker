@@ -173,9 +173,13 @@ async function main() {
 
   let browser;
   try {
+    console.log('[test-browser] Launching Chrome:', CHROME_BIN, 'with extension:', EXT_DIR);
     browser = await puppeteer.launch({
       executablePath: CHROME_BIN,
       headless: false,
+      enableExtensions: true,
+      dumpio: true,
+      timeout: 90000,
       userDataDir,
       args: [
         '--no-sandbox',
@@ -187,6 +191,7 @@ async function main() {
         `--host-resolver-rules=${hostResolverRules}`
       ]
     });
+    console.log('[test-browser] Chrome launched.');
 
     const { worker, extensionId } = await waitForShieldAdWorker(browser);
     console.log('ShieldAd worker ready:', extensionId);
