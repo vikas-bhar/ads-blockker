@@ -188,8 +188,32 @@ async function main() {
         `--host-resolver-rules=${hostResolverRules}`
       ]
     });
-    const installedId = await browser.installExtension(EXT_DIR);
-    console.log('[test-browser] Installed unpacked extension via CDP:', installedId);
+    let installedId;
+    try {
+      installedId = await browser.installExtension(EXT_DIR);
+      console.log('[test-browser] Installed unpacked extension via CDP:', installedId);
+    } catch (installErr) {
+      let extra = '';
+      try {
+        const b3 = await puppeteer.launch({
+          executablePath: CHROME_BIN,
+          headless: 'new',
+          enableExtensions: true,
+          timeout: 15000,
+          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--enable-unsafe-extension-debugging', `--disable-extensions-except=${EXT_DIR}`, `--load-extension=${EXT_DIR}`]
+        });
+        await new Promise((r) => setTimeout(r, 1500));
+        extra = `; loadExtTargets=[${b3.targets().map((t) => `${t.type()}:${t.url()}`).join(',')}]`;
+        const p3 = await b3.newPage();
+        await p3.goto('chrome://extensions', { waitUntil: 'domcontentloaded' });
+        const extText = await p3.evaluate(() => document.body?.innerText?.slice(0, 300) || '');
+        extra += `; chromeExt=${JSON.stringify(extText)}`;
+        await b3.close();
+      } catch (e3) {
+        extra = `; loadExtErr=${e3.message}`;
+      }
+      throw new Error(`installExtension failed: ${installErr.message}${extra}`);
+    }
 
     let worker, extensionId;
     try {
@@ -420,6 +444,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error);
+  console.error('FATAL:', String(error?.message || error).replace(/\s+/g, ' '));
   process.exit(1);
 });
