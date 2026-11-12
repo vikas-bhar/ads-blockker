@@ -199,47 +199,46 @@ async function main() {
         const nonUrls = fullDomains.filter((r) => !r.condition.urlFilter);
         const urls = fullDomains.filter((r) => r.condition.urlFilter);
 
-        const canLaunch = async (subUrls) => {
-          await fs.writeFile(path.join(tmpExt, 'rulesets/domains.json'), JSON.stringify([...nonUrls, ...subUrls]));
+        const tryCount = async (count, extraOpts = {}) => {
+          await fs.writeFile(path.join(tmpExt, 'rulesets/domains.json'), JSON.stringify([...nonUrls, ...urls.slice(0, count)]));
+          const t0 = Date.now();
           try {
             const b = await puppeteer.launch({
               executablePath: CHROME_BIN,
               headless: false,
               enableExtensions: true,
-              timeout: 6000,
+              timeout: 12000,
+              ...extraOpts,
               args: [
                 '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
                 `--disable-extensions-except=${tmpExt}`, `--load-extension=${tmpExt}`
               ]
             });
             await b.close();
-            return true;
-          } catch {
-            return false;
+            return `${count}:ok(${Date.now() - t0}ms)`;
+          } catch (e) {
+            return `${count}:err(${Date.now() - t0}ms:${e.message.slice(0, 35)})`;
           }
         };
 
-        const mid0 = Math.floor(urls.length / 2);
-        const h1 = await canLaunch(urls.slice(0, mid0));
-        const h2 = await canLaunch(urls.slice(mid0));
-        let diag = `totalUrls=${urls.length} h1=${h1} h2=${h2}`;
-
-        if (h1 !== h2) {
-          let lo = h1 ? mid0 : 0;
-          let hi = h1 ? urls.length : mid0;
-          while (hi - lo > 1) {
-            const mid = Math.floor((lo + hi) / 2);
-            const ok = await canLaunch(urls.slice(lo, mid));
-            if (ok) lo = mid;
-            else hi = mid;
-          }
-          diag += ` culpritIdx=${lo} culprit=${JSON.stringify(urls[lo])}`;
-        } else if (h1 && h2) {
-          const p2500 = await canLaunch(urls.slice(0, 2500));
-          const p3000 = await canLaunch(urls.slice(0, 3000));
-          diag += ` p2500=${p2500} p3000=${p3000}`;
+        const results = [];
+        for (const n of [0, 1800, 2500, 3000, 3200, 3400, 3550, urls.length]) {
+          results.push(await tryCount(n));
         }
-        throw new Error(`Launch fail (${launchErr.message}); ${diag}`);
+        results.push('headlessNew=' + await tryCount(urls.length, { headless: 'new' }));
+
+        const { spawnSync } = await import('node:child_process');
+        const tmpProf = await fs.mkdtemp(path.join(os.tmpdir(), 'prof-diag-'));
+        const logRes = spawnSync(CHROME_BIN, [
+          '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
+          '--enable-logging=stderr', '--remote-debugging-port=0',
+          `--user-data-dir=${tmpProf}`,
+          `--disable-extensions-except=${EXT_DIR}`, `--load-extension=${EXT_DIR}`
+        ], { timeout: 8000, encoding: 'utf8' });
+        await fs.rm(tmpProf, { recursive: true, force: true });
+        const errTail = (logRes.stderr || '').split(/\r?\n/).filter((l) => l && !l.includes('dbus/bus.cc')).slice(-8).join(' | ');
+
+        throw new Error(`Launch fail (${launchErr.message}); probes=[${results.join(', ')}]; stderr=[${errTail}]`);
       } finally {
         await fs.rm(tmpExt, { recursive: true, force: true });
       }
