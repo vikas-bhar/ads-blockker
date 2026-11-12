@@ -173,77 +173,21 @@ async function main() {
 
   let browser;
   try {
-    console.log('[test-browser] Launching Chrome:', CHROME_BIN, 'with extension:', EXT_DIR);
-    try {
-      browser = await puppeteer.launch({
-        executablePath: CHROME_BIN,
-        headless: false,
-        enableExtensions: true,
-        timeout: 45000,
-        userDataDir,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-          `--disable-extensions-except=${EXT_DIR}`,
-          `--load-extension=${EXT_DIR}`,
-          `--host-resolver-rules=${hostResolverRules}`
-        ]
-      });
-    } catch (launchErr) {
-      const tmpExt = await fs.mkdtemp(path.join(os.tmpdir(), 'probe-bs-'));
-      try {
-        await fs.cp(EXT_DIR, tmpExt, { recursive: true });
-        const fullDomains = JSON.parse(await fs.readFile(path.join(EXT_DIR, 'rulesets/domains.json'), 'utf8'));
-        const nonUrls = fullDomains.filter((r) => !r.condition.urlFilter);
-        const urls = fullDomains.filter((r) => r.condition.urlFilter);
-
-        const tryCount = async (count, extraOpts = {}) => {
-          await fs.writeFile(path.join(tmpExt, 'rulesets/domains.json'), JSON.stringify([...nonUrls, ...urls.slice(0, count)]));
-          const t0 = Date.now();
-          try {
-            const b = await puppeteer.launch({
-              executablePath: CHROME_BIN,
-              headless: false,
-              enableExtensions: true,
-              timeout: 12000,
-              ...extraOpts,
-              args: [
-                '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
-                `--disable-extensions-except=${tmpExt}`, `--load-extension=${tmpExt}`
-              ]
-            });
-            await b.close();
-            return `${count}:ok(${Date.now() - t0}ms)`;
-          } catch (e) {
-            return `${count}:err(${Date.now() - t0}ms:${e.message.slice(0, 35)})`;
-          }
-        };
-
-        const results = [];
-        for (const n of [0, 1800, 2500, 3000, 3200, 3400, 3550, urls.length]) {
-          results.push(await tryCount(n));
-        }
-        results.push('headlessNew=' + await tryCount(urls.length, { headless: 'new' }));
-
-        const { spawnSync } = await import('node:child_process');
-        const tmpProf = await fs.mkdtemp(path.join(os.tmpdir(), 'prof-diag-'));
-        const logRes = spawnSync(CHROME_BIN, [
-          '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
-          '--enable-logging=stderr', '--remote-debugging-port=0',
-          `--user-data-dir=${tmpProf}`,
-          `--disable-extensions-except=${EXT_DIR}`, `--load-extension=${EXT_DIR}`
-        ], { timeout: 8000, encoding: 'utf8' });
-        await fs.rm(tmpProf, { recursive: true, force: true });
-        const errTail = (logRes.stderr || '').split(/\r?\n/).filter((l) => l && !l.includes('dbus/bus.cc')).slice(-8).join(' | ');
-
-        throw new Error(`Launch fail (${launchErr.message}); probes=[${results.join(', ')}]; stderr=[${errTail}]`);
-      } finally {
-        await fs.rm(tmpExt, { recursive: true, force: true });
-      }
-    }
-    console.log('[test-browser] Chrome launched.');
+    browser = await puppeteer.launch({
+      executablePath: CHROME_BIN,
+      headless: 'new',
+      enableExtensions: true,
+      userDataDir,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        `--disable-extensions-except=${EXT_DIR}`,
+        `--load-extension=${EXT_DIR}`,
+        `--host-resolver-rules=${hostResolverRules}`
+      ]
+    });
 
     const { worker, extensionId } = await waitForShieldAdWorker(browser);
     console.log('ShieldAd worker ready:', extensionId);
