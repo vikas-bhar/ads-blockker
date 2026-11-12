@@ -205,8 +205,7 @@ async function main() {
         } catch (e) { return `err:${e.message.slice(0, 60)}`; }
       })();
 
-      // Binary probe: extension without DNR vs extension without regexFilter rules vs Chrome --v=1 stderr
-      const probe = async (label, mutateManifest, mutateAds) => {
+      const probe = async (label, mutateManifest, mutateDomains) => {
         const tmpExt = await fs.mkdtemp(path.join(os.tmpdir(), `probe-${label}-`));
         try {
           await fs.cp(EXT_DIR, tmpExt, { recursive: true });
@@ -214,11 +213,12 @@ async function main() {
           const m = JSON.parse(await fs.readFile(mPath, 'utf8'));
           if (mutateManifest) mutateManifest(m);
           await fs.writeFile(mPath, JSON.stringify(m));
-          if (mutateAds) {
-            const aPath = path.join(tmpExt, 'rulesets/ads.json');
-            const rules = JSON.parse(await fs.readFile(aPath, 'utf8'));
-            await fs.writeFile(aPath, JSON.stringify(mutateAds(rules)));
+          if (mutateDomains) {
+            const dPath = path.join(tmpExt, 'rulesets/domains.json');
+            const rules = JSON.parse(await fs.readFile(dPath, 'utf8'));
+            await fs.writeFile(dPath, JSON.stringify(mutateDomains(rules)));
           }
+          const t0 = Date.now();
           const b = await puppeteer.launch({
             executablePath: CHROME_BIN,
             headless: false,
@@ -230,32 +230,24 @@ async function main() {
             ]
           });
           await b.close();
-          return `${label}=ok`;
+          return `${label}=ok(${Date.now() - t0}ms)`;
         } catch (e) {
-          return `${label}=fail(${e.message.slice(0, 40)})`;
+          return `${label}=fail(${e.message.slice(0, 35)})`;
         } finally {
           await fs.rm(tmpExt, { recursive: true, force: true });
         }
       };
 
-      const { spawnSync } = await import('node:child_process');
-      const tmpProf = await fs.mkdtemp(path.join(os.tmpdir(), 'prof-diag-'));
-      const logRes = spawnSync(CHROME_BIN, [
-        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
-        '--enable-logging=stderr', '--v=1', '--remote-debugging-port=0',
-        `--user-data-dir=${tmpProf}`,
-        `--disable-extensions-except=${EXT_DIR}`, `--load-extension=${EXT_DIR}`
-      ], { timeout: 10000, encoding: 'utf8' });
-      await fs.rm(tmpProf, { recursive: true, force: true });
-      const errTail = (logRes.stderr || '').split(/\r?\n/).filter((l) => !l.includes('dbus/bus.cc')).slice(-8).join(' | ');
+      const r1 = await probe('noDomains4', (m) => {
+        m.declarative_net_request.rule_resources = m.declarative_net_request.rule_resources.filter((r) => r.id !== 'domains_4');
+      });
+      const r2 = await probe('noDomains1', (m) => {
+        m.declarative_net_request.rule_resources = m.declarative_net_request.rule_resources.filter((r) => r.id !== 'domains');
+      });
+      const r3 = await probe('noRemoveparam', null, (rules) => rules.filter((r) => r.action.type !== 'redirect'));
+      const r4 = await probe('noUrlsInDomains', null, (rules) => rules.filter((r) => !r.condition.urlFilter));
 
-      const [rNoDnr, rNoRegex, rOnlyAds] = await Promise.all([
-        probe('noDnr', (m) => { delete m.declarative_net_request; }),
-        probe('noRegex', null, (rules) => rules.filter((r) => !r.condition?.regexFilter)),
-        probe('onlyAds', (m) => { m.declarative_net_request.rule_resources = m.declarative_net_request.rule_resources.slice(0, 1); })
-      ]);
-
-      throw new Error(`Launch fail (${launchErr.message}); bare=${bareOk}; ${rNoDnr}; ${rNoRegex}; ${rOnlyAds}; stderr=[${errTail}]`);
+      throw new Error(`Launch fail (${launchErr.message}); bare=${bareOk}; ${r1}; ${r2}; ${r3}; ${r4}`);
     }
     console.log('[test-browser] Chrome launched.');
 
